@@ -78,6 +78,17 @@ func AddSecureCommand(rootCmd *cobra.Command, cfg *config.Config) {
 	secureCmd.MarkFlagRequired("domain")
 	secureCmd.MarkFlagRequired("email")
 
+	// Validación de requisitos antes de ejecutar
+	secureCmd.PreRunE = func(cmd *cobra.Command, args []string) error {
+		// Validar dominio
+		if err := utils.ValidateDomain(opts.Domain); err != nil {
+			return err
+		}
+
+		// Verificar requisitos
+		return utils.CheckRequirements("secure", nil)
+	}
+
 	// Agregar comando al comando raíz
 	rootCmd.AddCommand(secureCmd)
 }

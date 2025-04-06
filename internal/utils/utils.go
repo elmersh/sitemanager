@@ -4,38 +4,7 @@ package utils
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 )
-
-// ReadTemplateFile lee el contenido de un archivo de plantilla
-func ReadTemplateFile(tmplPath string) (string, error) {
-	// Buscar el archivo en varias ubicaciones posibles
-	possiblePaths := []string{
-		tmplPath,
-		filepath.Join("/etc/sitemanager", tmplPath),
-		filepath.Join("/usr/local/share/sitemanager", tmplPath),
-		filepath.Join("/usr/share/sitemanager", tmplPath),
-	}
-
-	// Buscar en el directorio actual
-	if execPath, err := os.Executable(); err == nil {
-		execDir := filepath.Dir(execPath)
-		possiblePaths = append(possiblePaths, filepath.Join(execDir, tmplPath))
-	}
-
-	// Buscar en las posibles ubicaciones
-	for _, path := range possiblePaths {
-		if _, err := os.Stat(path); err == nil {
-			content, err := os.ReadFile(path)
-			if err != nil {
-				return "", fmt.Errorf("error al leer plantilla %s: %v", path, err)
-			}
-			return string(content), nil
-		}
-	}
-
-	return "", fmt.Errorf("plantilla %s no encontrada", tmplPath)
-}
 
 // PathExists verifica si una ruta existe
 func PathExists(path string) bool {

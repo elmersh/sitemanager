@@ -1,0 +1,32 @@
+server {
+    listen 80;
+    server_name {{ .Domain }};
+
+    # Proxy para Node.js
+    location / {
+        proxy_pass http://localhost:{{ .Port }};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+    }
+
+    # Servir archivos estáticos si existen
+    location /static/ {
+        root {{ .RootDir }}/{{ .Domain }};
+        try_files $uri =404;
+    }
+
+    # Bloquear acceso a archivos sensibles
+    location ~ /\.ht {
+        deny all;
+    }
+
+    location ~ /\.git {
+        deny all;
+    }
+
+    access_log {{ .HomeDir }}/logs/{{ .Domain }}_access.log;
+    error_log {{ .HomeDir }}/logs/{{ .Domain }}_error.log;
+}
