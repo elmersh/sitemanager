@@ -11,14 +11,15 @@ import (
 
 // Config representa la configuración del sitemanager
 type Config struct {
-	NginxPath       string            `yaml:"nginxPath"`
-	SitesAvailable  string            `yaml:"sitesAvailable"`
-	SitesEnabled    string            `yaml:"sitesEnabled"`
-	DefaultUser     string            `yaml:"defaultUser"`
-	DefaultGroup    string            `yaml:"defaultGroup"`
-	PHPVersions     []string          `yaml:"phpVersions"`
-	DefaultTemplate string            `yaml:"defaultTemplate"`
-	Templates       map[string]string `yaml:"templates"`
+	NginxPath          string            `yaml:"nginxPath"`
+	SitesAvailable     string            `yaml:"sitesAvailable"`
+	SitesEnabled       string            `yaml:"sitesEnabled"`
+	DefaultUser        string            `yaml:"defaultUser"`
+	DefaultGroup       string            `yaml:"defaultGroup"`
+	PHPVersions        []string          `yaml:"phpVersions"`
+	DefaultTemplate    string            `yaml:"defaultTemplate"`
+	Templates          map[string]string `yaml:"templates"`
+	SubdomainTemplates map[string]string `yaml:"subdomainTemplates"`
 }
 
 // LoadConfig carga la configuración desde el archivo de configuración
@@ -31,7 +32,7 @@ func LoadConfig() (*Config, error) {
 
 	// Buscar en la ruta de configuración
 	configPath := filepath.Join(currentUser.HomeDir, ".config", "sitemanager.yaml")
-	
+
 	// Verificar si el archivo existe
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		// Si no existe, crear un archivo de configuración por defecto
@@ -64,8 +65,12 @@ func createDefaultConfig(path string) (*Config, error) {
 		PHPVersions:     []string{"7.4", "8.0", "8.1", "8.2", "8.3", "8.4"},
 		DefaultTemplate: "laravel",
 		Templates: map[string]string{
-			"laravel": "templates/nginx/laravel.conf.tmpl",
-			"nodejs":  "templates/nginx/nodejs.conf.tmpl",
+			"laravel": "nginx/laravel.conf.tmpl",
+			"nodejs":  "nginx/nodejs.conf.tmpl",
+		},
+		SubdomainTemplates: map[string]string{
+			"laravel": "nginx/subdomain_laravel.conf.tmpl",
+			"nodejs":  "nginx/subdomain_nodejs.conf.tmpl",
 		},
 	}
 

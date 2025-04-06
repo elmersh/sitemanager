@@ -70,15 +70,6 @@ ubuntu: clean deps
 	@echo "Compilando para Ubuntu..."
 	mkdir -p sitemanager
 	cd cmd/sm && GOOS=$(UBUNTU_GOOS) GOARCH=$(UBUNTU_GOARCH) $(GOBUILD) $(LDFLAGS) -o ../../$(UBUNTU_BINARY)
-	@echo "Creando script de instalación..."
-	@echo '#!/bin/bash' > sitemanager/install.sh
-	@echo 'if [ -f /usr/local/bin/sm ]; then' >> sitemanager/install.sh
-	@echo '    rm /usr/local/bin/sm' >> sitemanager/install.sh
-	@echo 'fi' >> sitemanager/install.sh
-	@echo 'cp sm /usr/local/bin/' >> sitemanager/install.sh
-	@echo 'chmod +x /usr/local/bin/sm' >> sitemanager/install.sh
-	@echo 'echo "SiteManager instalado en /usr/local/bin/sm"' >> sitemanager/install.sh
-	chmod +x sitemanager/install.sh
 	@echo "Creando paquete..."
 	tar -czf $(UBUNTU_PACKAGE) sitemanager
 	@echo "Paquete creado: $(UBUNTU_PACKAGE)"

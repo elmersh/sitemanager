@@ -15,13 +15,15 @@ import (
 
 // SiteOptions contiene las opciones para el comando site
 type SiteOptions struct {
-	Domain   string
-	Type     string
-	PHP      string
-	Port     int
-	User     string
-	HomeDir  string
-	NginxDir string
+	Domain       string
+	Type         string
+	PHP          string
+	Port         int
+	User         string
+	HomeDir      string
+	NginxDir     string
+	IsSubdomain  bool
+	ParentDomain string
 }
 
 // AddSiteCommand agrega el comando site al comando raíz
@@ -51,9 +53,22 @@ func AddSiteCommand(rootCmd *cobra.Command, cfg *config.Config) {
 				return fmt.Errorf("tipo de sitio no válido: %s", opts.Type)
 			}
 
-			// Configurar usuario y directorios
-			opts.User = strings.Split(opts.Domain, ".")[0]
-			opts.HomeDir = filepath.Join("/home", opts.Domain)
+			// Determinar si es un subdominio
+			domainParts := strings.Split(opts.Domain, ".")
+			if len(domainParts) > 2 && domainParts[0] != "www" {
+				opts.IsSubdomain = true
+				opts.ParentDomain = strings.Join(domainParts[1:], ".")
+				fmt.Printf("Detectado subdominio de %s\n", opts.ParentDomain)
+
+				// Usar el usuario del dominio principal para subdominios
+				opts.User = strings.Split(opts.ParentDomain, ".")[0]
+				opts.HomeDir = filepath.Join("/home", opts.ParentDomain)
+			} else {
+				// No es subdominio, configuración normal
+				opts.User = domainParts[0]
+				opts.HomeDir = filepath.Join("/home", opts.Domain)
+			}
+
 			opts.NginxDir = filepath.Join(opts.HomeDir, ".nginx")
 			opts.Port = port
 
@@ -91,6 +106,22 @@ func AddSiteCommand(rootCmd *cobra.Command, cfg *config.Config) {
 	// Marcar flags obligatorios
 	siteCmd.MarkFlagRequired("domain")
 
+	// Validación de requisitos antes de ejecutar
+	siteCmd.PreRunE = func(cmd *cobra.Command, args []string) error {
+		// Validar dominio
+		if err := utils.ValidateDomain(opts.Domain); err != nil {
+			return err
+		}
+
+		// Verificar requisitos
+		requirements := map[string]string{
+			"template": opts.Type,
+			"php":      opts.PHP,
+		}
+
+		return utils.CheckRequirements("site", requirements)
+	}
+
 	// Agregar comando al comando raíz
 	rootCmd.AddCommand(siteCmd)
 }
@@ -101,11 +132,16 @@ func createUserAndDirs(opts *SiteOptions) error {
 	if _, err := exec.Command("id", opts.User).Output(); err == nil {
 		fmt.Printf("Usuario %s ya existe\n", opts.User)
 	} else {
-		// Crear usuario
-		fmt.Printf("Creando usuario %s...\n", opts.User)
-		cmd := exec.Command("useradd", "-m", "-d", opts.HomeDir, "-s", "/bin/bash", opts.User)
-		if output, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("error al crear usuario: %v\n%s", err, output)
+		// Solo crear usuario si no es un subdominio (los subdominios usan el usuario del dominio principal)
+		if !opts.IsSubdomain {
+			// Crear usuario
+			fmt.Printf("Creando usuario %s...\n", opts.User)
+			cmd := exec.Command("useradd", "-m", "-d", opts.HomeDir, "-s", "/bin/bash", opts.User)
+			if output, err := cmd.CombinedOutput(); err != nil {
+				return fmt.Errorf("error al crear usuario: %v\n%s", err, output)
+			}
+		} else {
+			return fmt.Errorf("el usuario %s no existe, primero debe crear el dominio principal %s", opts.User, opts.ParentDomain)
 		}
 	}
 
@@ -138,8 +174,26 @@ func createUserAndDirs(opts *SiteOptions) error {
 
 // generateNginxConfig genera la configuración de Nginx para el sitio
 func generateNginxConfig(opts *SiteOptions, cfg *config.Config) error {
-	// Leer plantilla según el tipo de sitio
-	tmplPath := cfg.Templates[opts.Type]
+	// Determinar qué plantilla usar según si es subdominio o no
+	var tmplPath string
+	if opts.IsSubdomain {
+		if path, ok := cfg.SubdomainTemplates[opts.Type]; ok {
+			tmplPath = path
+		} else {
+			// Fallback a plantilla normal si no hay específica para subdominio
+			tmplPath = cfg.Templates[opts.Type]
+		}
+	} else {
+		tmplPath = cfg.Templates[opts.Type]
+	}
+
+	// Verificar que la ruta no esté vacía
+	if tmplPath == "" {
+		return fmt.Errorf("no se encontró una plantilla para el tipo de sitio: %s", opts.Type)
+	}
+
+	fmt.Printf("Usando plantilla: %s\n", tmplPath)
+
 	tmplContent, err := utils.ReadTemplateFile(tmplPath)
 	if err != nil {
 		return err
@@ -173,6 +227,15 @@ func generateNginxConfig(opts *SiteOptions, cfg *config.Config) error {
 	// Ejecutar plantilla
 	if err := tmpl.Execute(file, data); err != nil {
 		return fmt.Errorf("error al ejecutar plantilla: %v", err)
+	}
+
+	// Cerrar el archivo antes de cambiar el propietario
+	file.Close()
+
+	// Cambiar propietario del archivo de configuración
+	cmd := exec.Command("chown", fmt.Sprintf("%s:%s", opts.User, opts.User), confFile)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("error al cambiar propietario del archivo de configuración: %v\n%s", err, output)
 	}
 
 	fmt.Printf("Configuración de Nginx generada en %s\n", confFile)
