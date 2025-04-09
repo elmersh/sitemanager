@@ -243,6 +243,7 @@ func updateNginxConfigWithSSL(opts *SecureOptions, cfg *config.Config) error {
 		"KeyPath":      fmt.Sprintf("/etc/letsencrypt/live/%s/privkey.pem", opts.Domain),
 		"HomeDir":      opts.HomeDir,
 		"RedirectHTTP": true,
+		"PHP":          "8.4",
 	}
 
 	// Archivo de configuración actual
