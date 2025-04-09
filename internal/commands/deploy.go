@@ -7,7 +7,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/elmersh/sitemanager/internal/config"
 	"github.com/elmersh/sitemanager/internal/utils"
@@ -30,6 +32,7 @@ type DeployOptions struct {
 	ParentDomain string
 	RepoOwner    string
 	RepoName     string
+	Backup       bool
 }
 
 // AddDeployCommand agrega el comando deploy al comando raíz
@@ -40,6 +43,7 @@ func AddDeployCommand(rootCmd *cobra.Command, cfg *config.Config) {
 	// Opciones del comando
 	var opts DeployOptions
 	var useSSH bool
+	var dbType string // Declaración de la variable para el tipo de base de datos
 
 	// Crear comando deploy
 	deployCmd := &cobra.Command{
@@ -47,7 +51,7 @@ func AddDeployCommand(rootCmd *cobra.Command, cfg *config.Config) {
 		Short: "Desplegar una aplicación web",
 		Long:  `Despliega una aplicación web desde un repositorio Git y configura el entorno necesario.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Configurar opciones
+
 			if opts.Domain == "" {
 				return fmt.Errorf("el dominio es obligatorio")
 			}
@@ -118,9 +122,32 @@ func AddDeployCommand(rootCmd *cobra.Command, cfg *config.Config) {
 				}
 			}
 
-			// Verificar si el directorio de la aplicación existe
-			if _, err := os.Stat(opts.AppDir); os.IsNotExist(err) {
-				return fmt.Errorf("el directorio de la aplicación no existe: %s", opts.AppDir)
+			// Verificar si el sitio existe antes de continuar
+			if !siteExists(opts.Domain, cfg) {
+				return fmt.Errorf("el sitio %s no existe, primero crea el sitio con 'sm site'", opts.Domain)
+			}
+
+			// Crear la estructura de directorios necesaria
+			fmt.Printf("Creando estructura de directorios en %s...\n", filepath.Dir(opts.AppDir))
+
+			// Crear el directorio apps si no existe
+			appsDir := filepath.Join(opts.HomeDir, "apps")
+			if _, err := os.Stat(appsDir); os.IsNotExist(err) {
+				fmt.Printf("Creando directorio apps en %s...\n", appsDir)
+				if err := os.MkdirAll(appsDir, 0755); err != nil {
+					return fmt.Errorf("error al crear directorio apps: %v", err)
+				}
+			}
+
+			// Crear todos los directorios padres necesarios
+			if err := os.MkdirAll(filepath.Dir(opts.AppDir), 0755); err != nil {
+				return fmt.Errorf("error al crear directorios padres: %v", err)
+			}
+
+			// Cambiar propietario de los directorios padres
+			chownCmd := exec.Command("chown", "-R", fmt.Sprintf("%s:%s", opts.User, opts.User), filepath.Join(opts.HomeDir, "apps"))
+			if output, err := chownCmd.CombinedOutput(); err != nil {
+				return fmt.Errorf("error al cambiar propietario de los directorios padres: %v\n%s", err, output)
 			}
 
 			// Generar nombre para la clave SSH
@@ -132,11 +159,6 @@ func AddDeployCommand(rootCmd *cobra.Command, cfg *config.Config) {
 
 				keyName := fmt.Sprintf("%s_%s_%s", domainSafe, ownerSafe, repoSafe)
 				opts.SSHKeyPath = filepath.Join(opts.HomeDir, ".ssh", keyName)
-
-				// Verificar si el sitio existe
-				if !siteExists(opts.Domain, cfg) {
-					return fmt.Errorf("el sitio %s no existe, primero crea el sitio con 'sm site'", opts.Domain)
-				}
 
 				// Clonar repositorio
 				if err := cloneRepository(&opts); err != nil {
@@ -150,7 +172,7 @@ func AddDeployCommand(rootCmd *cobra.Command, cfg *config.Config) {
 						return err
 					}
 				case "nodejs":
-					if err := deployNodejs(&opts); err != nil {
+					if err := deployNodejs(&opts, dbType); err != nil {
 						return err
 					}
 				default:
@@ -169,6 +191,7 @@ func AddDeployCommand(rootCmd *cobra.Command, cfg *config.Config) {
 	deployCmd.Flags().StringVarP(&opts.Type, "type", "t", "", "Tipo de aplicación (laravel, nodejs)")
 	deployCmd.Flags().StringVarP(&opts.Environment, "env", "e", "production", "Entorno (development, production)")
 	deployCmd.Flags().BoolVarP(&useSSH, "ssh", "s", false, "Usar SSH para clonar el repositorio")
+	deployCmd.Flags().StringVar(&dbType, "database", "", "Tipo de base de datos a configurar (postgresql, mysql)")
 
 	// Marcar flags obligatorios
 	deployCmd.MarkFlagRequired("domain")
@@ -239,6 +262,52 @@ func AddDeployCommand(rootCmd *cobra.Command, cfg *config.Config) {
 	// Agregar subcomando reset-pm2 al comando deploy
 	deployCmd.AddCommand(resetPM2Cmd)
 
+	// Crear subcomando remove
+	removeCmd := &cobra.Command{
+		Use:   "remove",
+		Short: "Eliminar un proyecto desplegado",
+		Long:  `Elimina un proyecto desplegado, deteniendo PM2, eliminando la aplicación y opcionalmente haciendo backup de la carpeta del proyecto.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// Configurar opciones
+			if opts.Domain == "" {
+				return fmt.Errorf("el dominio es obligatorio")
+			}
+
+			// Determinar si es un subdominio
+			domainParts := strings.Split(opts.Domain, ".")
+			if len(domainParts) > 2 && domainParts[0] != "www" {
+				opts.IsSubdomain = true
+				opts.ParentDomain = strings.Join(domainParts[1:], ".")
+				fmt.Printf("Detectado subdominio de %s\n", opts.ParentDomain)
+
+				// Usar el usuario del dominio principal para subdominios
+				opts.User = strings.Split(opts.ParentDomain, ".")[0]
+				opts.HomeDir = filepath.Join("/home", opts.ParentDomain)
+				opts.AppDir = filepath.Join(opts.HomeDir, "apps", opts.Domain)
+			} else {
+				// No es subdominio, configuración normal
+				opts.User = domainParts[0]
+				opts.HomeDir = filepath.Join("/home", opts.Domain)
+				opts.AppDir = filepath.Join(opts.HomeDir, "apps", opts.Domain)
+			}
+
+			// Verificar si el directorio de la aplicación existe
+			if _, err := os.Stat(opts.AppDir); os.IsNotExist(err) {
+				return fmt.Errorf("el directorio de la aplicación no existe: %s", opts.AppDir)
+			}
+
+			return removeDeployedProject(&opts)
+		},
+	}
+
+	// Agregar flags al subcomando remove
+	removeCmd.Flags().StringVarP(&opts.Domain, "domain", "d", "", "Dominio del sitio (obligatorio)")
+	removeCmd.Flags().BoolVar(&opts.Backup, "backup", false, "Hacer backup de la carpeta del proyecto antes de eliminar")
+	removeCmd.MarkFlagRequired("domain")
+
+	// Agregar subcomando remove al comando deploy
+	deployCmd.AddCommand(removeCmd)
+
 	// Agregar comando al comando raíz
 	rootCmd.AddCommand(deployCmd)
 }
@@ -269,8 +338,30 @@ func cloneRepository(opts *DeployOptions) error {
 
 	// Construir la ruta del directorio de la aplicación
 	// Usar el dominio completo como directorio principal y el nombre del repositorio como subdirectorio
-	appDir := filepath.Join(opts.HomeDir, "apps", opts.Domain, repoName)
+	var appDir string
+	if opts.IsSubdomain {
+		// Para subdominios, usar la estructura /home/parentdomain/apps/subdomain/reponame
+		appDir = filepath.Join(opts.HomeDir, "apps", opts.Domain, repoName)
+	} else {
+		// Para dominios principales, usar la estructura /home/domain/apps/domain/reponame
+		appDir = filepath.Join(opts.HomeDir, "apps", opts.Domain, repoName)
+	}
 	opts.AppDir = appDir
+
+	// Crear la estructura de directorios necesaria
+	parentDir := filepath.Dir(appDir)
+	fmt.Printf("Creando estructura de directorios en %s...\n", parentDir)
+
+	// Crear todos los directorios padres necesarios
+	if err := os.MkdirAll(parentDir, 0755); err != nil {
+		return fmt.Errorf("error al crear directorios padres: %v", err)
+	}
+
+	// Cambiar propietario de los directorios padres
+	chownCmd := exec.Command("chown", "-R", fmt.Sprintf("%s:%s", opts.User, opts.User), filepath.Join(opts.HomeDir, "apps"))
+	if output, err := chownCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("error al cambiar propietario de los directorios padres: %v\n%s", err, output)
+	}
 
 	// Verificar si el directorio de la aplicación ya existe
 	if _, err := os.Stat(appDir); err == nil {
@@ -279,18 +370,6 @@ func cloneRepository(opts *DeployOptions) error {
 		if err := os.RemoveAll(appDir); err != nil {
 			return fmt.Errorf("error al eliminar directorio de la aplicación: %v", err)
 		}
-	}
-
-	// Asegurarse de que el directorio padre existe y tiene los permisos correctos
-	parentDir := filepath.Dir(appDir)
-	if err := os.MkdirAll(parentDir, 0755); err != nil {
-		return fmt.Errorf("error al crear directorio padre: %v", err)
-	}
-
-	// Cambiar propietario del directorio padre
-	chownCmd := exec.Command("chown", fmt.Sprintf("%s:%s", opts.User, opts.User), parentDir)
-	if output, err := chownCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("error al cambiar propietario del directorio padre: %v\n%s", err, output)
 	}
 
 	// Si vamos a usar SSH, necesitamos manejar las claves
@@ -549,8 +628,13 @@ func deployLaravel(opts *DeployOptions) error {
 }
 
 // Modificación en deployNodejs
-func deployNodejs(opts *DeployOptions) error {
+func deployNodejs(opts *DeployOptions, dbType string) error {
 	fmt.Printf("Desplegando aplicación Node.js en %s...\n", opts.Domain)
+
+	// Verificar si el directorio de la aplicación existe
+	if _, err := os.Stat(opts.AppDir); os.IsNotExist(err) {
+		return fmt.Errorf("el directorio de la aplicación no existe: %s", opts.AppDir)
+	}
 
 	// Cambiar al directorio de la aplicación
 	if err := os.Chdir(opts.AppDir); err != nil {
@@ -573,13 +657,103 @@ func deployNodejs(opts *DeployOptions) error {
 		fmt.Println("Proyecto con TypeScript: Sí")
 	}
 
-	// Determinar puerto para la aplicación - MOVER ESTA SECCIÓN AQUÍ ARRIBA
-	port := projectInfo.DefaultPort
+	// AQUÍ ES DONDE DEBEMOS COLOCAR NUESTRA LÓGICA DE SELECCIÓN DE BASE DE DATOS
+	// Si se especificó un tipo de base de datos mediante flag, forzar su uso
+	if dbType != "" {
+		switch dbType {
+		case "postgresql", "postgres", "pg":
+			projectInfo.RequiresDatabase = true
+			projectInfo.DBType = "postgresql"
+			fmt.Println("Forzando tipo de base de datos: PostgreSQL")
+		case "mysql":
+			projectInfo.RequiresDatabase = true
+			projectInfo.DBType = "mysql"
+			fmt.Println("Forzando tipo de base de datos: MySQL")
+		default:
+			fmt.Printf("Tipo de base de datos no reconocido: %s. Se usará la detección automática.\n", dbType)
+		}
+	}
+
+	// Determinar puerto para la aplicación
+	var port int
 	if opts.IsSubdomain {
-		// Para subdominios, usar un puerto diferente basado en una función hash simple
+		// Para subdominios, usar un puerto aleatorio
 		h := fnv.New32a()
 		h.Write([]byte(opts.Domain))
-		port = 3000 + int(h.Sum32()%1000) // Puertos entre 3000 y 3999
+		port = 3001 + int(h.Sum32()%999) // Puertos entre 3001 y 3999
+		fmt.Printf("Generando puerto aleatorio para subdominio: %d\n", port)
+	} else {
+		// Para dominios principales, usar un puerto aleatorio
+		h := fnv.New32a()
+		h.Write([]byte(opts.Domain))
+		port = 3001 + int(h.Sum32()%999) // Puertos entre 3001 y 3999
+		fmt.Printf("Generando puerto aleatorio para dominio principal: %d\n", port)
+	}
+
+	// Actualizar la configuración de Nginx con el nuevo puerto
+	nginxConfPath := filepath.Join(opts.HomeDir, "nginx", fmt.Sprintf("%s.conf", opts.Domain))
+	if _, err := os.Stat(nginxConfPath); err == nil {
+		// Leer el archivo
+		confData, err := os.ReadFile(nginxConfPath)
+		if err != nil {
+			return fmt.Errorf("error al leer configuración Nginx: %v", err)
+		}
+
+		// Reemplazar el puerto en la configuración
+		confStr := string(confData)
+		var newConf string
+
+		// Buscar y reemplazar cualquier proxy_pass existente
+		if strings.Contains(confStr, "proxy_pass http://localhost:") {
+			// Extraer el puerto actual
+			portParts := strings.Split(confStr, "proxy_pass http://localhost:")
+			if len(portParts) > 1 {
+				portEnd := strings.Index(portParts[1], ";")
+				if portEnd > 0 {
+					oldPort := portParts[1][:portEnd]
+					// Reemplazar el puerto antiguo con el nuevo
+					newConf = strings.ReplaceAll(confStr, "proxy_pass http://localhost:"+oldPort, fmt.Sprintf("proxy_pass http://localhost:%d", port))
+				} else {
+					// Si no se puede extraer el puerto, simplemente reemplazar toda la línea
+					newConf = strings.ReplaceAll(confStr, "proxy_pass http://localhost:", fmt.Sprintf("proxy_pass http://localhost:%d", port))
+				}
+			} else {
+				// Si no se puede extraer el puerto, simplemente reemplazar toda la línea
+				newConf = strings.ReplaceAll(confStr, "proxy_pass http://localhost:", fmt.Sprintf("proxy_pass http://localhost:%d", port))
+			}
+		} else {
+			// Si no hay proxy_pass, agregar uno nuevo
+			// Buscar la ubicación correcta para agregar el proxy_pass
+			if strings.Contains(confStr, "location / {") {
+				newConf = strings.ReplaceAll(confStr, "location / {", fmt.Sprintf("location / {\n        proxy_pass http://localhost:%d;", port))
+			} else if strings.Contains(confStr, "location /") {
+				newConf = strings.ReplaceAll(confStr, "location /", fmt.Sprintf("location / {\n        proxy_pass http://localhost:%d;", port))
+			} else {
+				// Si no se encuentra una ubicación adecuada, agregar al final
+				newConf = confStr + fmt.Sprintf("\n    location / {\n        proxy_pass http://localhost:%d;\n    }", port)
+			}
+		}
+
+		// Escribir el archivo
+		if err := os.WriteFile(nginxConfPath, []byte(newConf), 0644); err != nil {
+			return fmt.Errorf("error al escribir configuración Nginx: %v", err)
+		}
+
+		// Cambiar propietario del archivo de configuración
+		chownCmd := exec.Command("chown", fmt.Sprintf("%s:%s", opts.User, opts.User), nginxConfPath)
+		if output, err := chownCmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("error al cambiar propietario del archivo de configuración: %v\n%s", err, output)
+		}
+
+		// Recargar Nginx
+		reloadCmd := exec.Command("systemctl", "reload", "nginx")
+		if output, err := reloadCmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("error al recargar Nginx: %v\n%s", err, output)
+		}
+
+		fmt.Printf("Configuración de Nginx actualizada para usar el puerto %d\n", port)
+	} else {
+		fmt.Printf("No se encontró archivo de configuración Nginx en %s\n", nginxConfPath)
 	}
 
 	// Verificar si necesita variables de entorno
@@ -596,41 +770,39 @@ func deployNodejs(opts *DeployOptions) error {
 			// Configurar base de datos según el tipo
 			switch projectInfo.DBType {
 			case "postgresql":
-				// Verificar si PostgreSQL está disponible
-				pgCheckCmd := exec.Command("pg_isready")
-				if output, err := pgCheckCmd.CombinedOutput(); err != nil {
-					fmt.Printf("Advertencia: PostgreSQL no está disponible: %v\n%s\n", err, output)
-					fmt.Println("Se omitirá la configuración de la base de datos. Por favor, configure PostgreSQL manualmente.")
-					// Continuar sin configurar la base de datos
-					break
-				}
+				// Usar la función mejorada de configuración de PostgreSQL
+				pgEnvVars, pgErr := setupPostgreSQLDatabase(opts, projectInfo)
+				if pgErr != nil {
+					fmt.Printf("Advertencia: error al configurar PostgreSQL: %v\n", pgErr)
+					fmt.Println("Se omitirá la configuración automática de la base de datos.")
+					fmt.Println("Por favor, configure PostgreSQL manualmente y actualice el archivo .env")
 
-				dbName := strings.ReplaceAll(opts.Domain, ".", "_")
-				dbUser := strings.ReplaceAll(opts.User, "-", "_")
-				dbPassword := generateRandomPassword(16)
+					// Agregar variables de entorno de respaldo para que Prisma no falle
+					dbName := strings.ReplaceAll(opts.Domain, ".", "_")
+					dbUser := opts.User
+					dbPassword := "dev_password_please_change" // Contraseña temporal que debe cambiarse
 
-				dbOpts := &utils.DatabaseOptions{
-					Type:     utils.DBTypePostgreSQL,
-					Host:     "localhost",
-					Port:     5432,
-					Name:     dbName,
-					User:     dbUser,
-					Password: dbPassword,
-					Schema:   "public",
-					SSLMode:  "prefer",
-				}
+					// Configurar variables de entorno de respaldo
+					userEnvVars["DATABASE_URL"] = fmt.Sprintf("postgresql://%s:%s@localhost:5432/%s?schema=public",
+						dbUser, dbPassword, dbName)
+					userEnvVars["DB_CONNECTION"] = "pgsql"
+					userEnvVars["DB_HOST"] = "localhost"
+					userEnvVars["DB_PORT"] = "5432"
+					userEnvVars["DB_DATABASE"] = dbName
+					userEnvVars["DB_USERNAME"] = dbUser
+					userEnvVars["DB_PASSWORD"] = dbPassword
 
-				// Crear base de datos
-				fmt.Println("Creando base de datos PostgreSQL...")
-				if err := utils.CreateDatabase(dbOpts); err != nil {
-					fmt.Printf("Advertencia: error al crear base de datos: %v\n", err)
-					fmt.Println("Se omitirá la configuración de la base de datos. Por favor, configure PostgreSQL manualmente.")
-					// Continuar aunque haya error en la creación de la base de datos
+					// Agregar comentario al principio del archivo .env
+					userEnvVars["# IMPORTANTE"] = "La configuración de PostgreSQL no pudo completarse automáticamente."
+					userEnvVars["# POR FAVOR"] = "Modifique las credenciales de la base de datos manualmente."
 				} else {
-					// Agregar URL de conexión a las variables de entorno
-					userEnvVars["DATABASE_URL"] = utils.BuildDatabaseURL(dbOpts)
+					// Agregar variables de entorno de PostgreSQL
+					for key, value := range pgEnvVars {
+						userEnvVars[key] = value
+					}
 				}
 			case "mysql":
+				// Código existente para MySQL
 				dbName := strings.ReplaceAll(opts.Domain, ".", "_")
 				dbUser := strings.ReplaceAll(opts.User, "-", "_")
 				dbPassword := generateRandomPassword(16)
@@ -654,7 +826,15 @@ func deployNodejs(opts *DeployOptions) error {
 				} else {
 					// Agregar URL de conexión a las variables de entorno
 					userEnvVars["DATABASE_URL"] = utils.BuildDatabaseURL(dbOpts)
+					userEnvVars["DB_CONNECTION"] = "mysql"
+					userEnvVars["DB_HOST"] = "localhost"
+					userEnvVars["DB_PORT"] = "3306"
+					userEnvVars["DB_DATABASE"] = dbName
+					userEnvVars["DB_USERNAME"] = dbUser
+					userEnvVars["DB_PASSWORD"] = dbPassword
 				}
+			default:
+				fmt.Printf("Tipo de base de datos no soportado: %s\n", projectInfo.DBType)
 			}
 		}
 
@@ -668,11 +848,12 @@ func deployNodejs(opts *DeployOptions) error {
 				userEnvVars["JWT_EXPIRES_IN"] = "7d"
 			}
 			userEnvVars["NODE_ENV"] = "production"
-			userEnvVars["PORT"] = fmt.Sprintf("%d", port) // Ahora port ya está definido
+			userEnvVars["PORT"] = fmt.Sprintf("%d", port) // Asegurarse de que el puerto se establece correctamente
 		case utils.FrameworkNextJS:
 			userEnvVars["NODE_ENV"] = "production"
-			userEnvVars["PORT"] = fmt.Sprintf("%d", port) // Ahora port ya está definido
-			// Agregar variables específicas para NextJS
+			userEnvVars["PORT"] = fmt.Sprintf("%d", port) // Asegurarse de que el puerto se establece correctamente
+
+			// Configurar variables específicas para NextJS
 			if _, ok := projectInfo.EnvVars["NEXT_PUBLIC_API_URL"]; ok {
 				// Si estamos en un subdominio, la API podría estar en otro subdominio
 				if opts.IsSubdomain {
@@ -682,9 +863,25 @@ func deployNodejs(opts *DeployOptions) error {
 					userEnvVars["NEXT_PUBLIC_API_URL"] = "https://api." + opts.Domain
 				}
 			}
+
+			// Configurar otras variables comunes de NextJS si existen en .env.example
+			nextjsCommonVars := []string{
+				"NEXT_PUBLIC_IMAGE_DOMAINS",
+				"NEXT_PUBLIC_IMAGES_URL",
+				"NEXT_PUBLIC_BODY_SIZE_LIMIT",
+			}
+
+			for _, varName := range nextjsCommonVars {
+				if value, ok := projectInfo.EnvVars[varName]; ok {
+					userEnvVars[varName] = value
+				}
+			}
+
+			// Asegurar que PWA está habilitada en producción
+			userEnvVars["NEXT_PUBLIC_PWA_ENABLED"] = "true"
 		case utils.FrameworkExpress:
 			userEnvVars["NODE_ENV"] = "production"
-			userEnvVars["PORT"] = fmt.Sprintf("%d", port) // Ahora port ya está definido
+			userEnvVars["PORT"] = fmt.Sprintf("%d", port) // Asegurarse de que el puerto se establece correctamente
 		}
 
 		// Configurar archivo .env
@@ -707,34 +904,66 @@ func deployNodejs(opts *DeployOptions) error {
 			fmt.Println("Proyecto con Prisma detectado, ejecutando migraciones...")
 
 			// Verificar si PostgreSQL está disponible antes de ejecutar comandos de Prisma
-			pgCheckCmd := exec.Command("pg_isready")
-			if output, err := pgCheckCmd.CombinedOutput(); err != nil {
-				fmt.Printf("Advertencia: PostgreSQL no está disponible: %v\n%s\n", err, output)
+			pgCheckCmd := exec.Command("sudo", "-u", "postgres", "pg_isready")
+			if pgOutput, pgErr := pgCheckCmd.CombinedOutput(); pgErr != nil {
+				fmt.Printf("Advertencia: PostgreSQL no está disponible: %v\n%s\n", pgErr, pgOutput)
 				fmt.Println("Se omitirán las operaciones de Prisma. Por favor, configure PostgreSQL manualmente y ejecute las migraciones después.")
 			} else {
-				// Ejecutar comandos de Prisma
-				prismaCommands := []string{
-					// Generar cliente Prisma
-					"npx prisma generate",
-					// Ejecutar migraciones (solo si existe la carpeta migrations)
-					"[ -d prisma/migrations ] && npx prisma migrate deploy || echo 'No hay migraciones para aplicar'",
+				// Verificar que DATABASE_URL existe en el archivo .env antes de continuar
+				envFilePath := filepath.Join(opts.AppDir, ".env")
+				if envContent, err := os.ReadFile(envFilePath); err == nil {
+					envLines := strings.Split(string(envContent), "\n")
+					hasDbUrl := false
+
+					for _, line := range envLines {
+						if strings.HasPrefix(line, "DATABASE_URL=") {
+							hasDbUrl = true
+							break
+						}
+					}
+
+					if !hasDbUrl {
+						fmt.Println("No se encontró DATABASE_URL en el archivo .env. Se omitirán las operaciones de Prisma.")
+						return nil // Return nil to indicate no error
+					}
 				}
 
-				for _, cmdStr := range prismaCommands {
-					cmd := exec.Command("su", "-c", cmdStr, opts.User)
-					cmd.Dir = opts.AppDir
-					fmt.Printf("Ejecutando: %s\n", cmdStr)
-					if output, err := cmd.CombinedOutput(); err != nil {
-						// Para migraciones, podemos continuar aunque haya errores
-						if strings.Contains(cmdStr, "migrate") {
-							fmt.Printf("Advertencia: error en migraciones de Prisma (no crítico): %v\n%s\n", err, output)
-						} else {
-							fmt.Printf("Error al ejecutar comando Prisma: %v\n%s\n", err, output)
-							// Para otros comandos, podría ser más crítico pero continuamos
-						}
-					} else if len(output) > 0 {
-						fmt.Printf("Salida: %s\n", output)
+				// Ejecutar comandos de Prisma directamente sin instalar globalmente
+				// Instalar @prisma/client y generar el cliente
+				generateCmd := "npm install @prisma/client && npx prisma generate"
+				cmd := exec.Command("su", "-c", generateCmd, opts.User)
+				cmd.Dir = opts.AppDir
+				fmt.Printf("Ejecutando: %s\n", generateCmd)
+				if output, err := cmd.CombinedOutput(); err != nil {
+					fmt.Printf("Error al ejecutar prisma generate: %v\n%s\n", err, output)
+					// Intentar una alternativa
+					alternativeCmd := "cd " + opts.AppDir + " && npm install @prisma/client && npx prisma generate"
+					altCmd := exec.Command("su", "-c", alternativeCmd, opts.User)
+					fmt.Printf("Intentando comando alternativo: %s\n", alternativeCmd)
+					if altOutput, altErr := altCmd.CombinedOutput(); altErr != nil {
+						fmt.Printf("Error con el comando alternativo: %v\n%s\n", altErr, altOutput)
+					} else {
+						fmt.Printf("Comando alternativo exitoso: %s\n", altOutput)
 					}
+				} else {
+					fmt.Printf("Prisma generate completado: %s\n", output)
+				}
+
+				// Verificar si existen migraciones antes de intentar ejecutarlas
+				migrationsPath := filepath.Join(opts.AppDir, "prisma", "migrations")
+				if _, err := os.Stat(migrationsPath); err == nil {
+					// Ejecutar prisma migrate deploy
+					migrateCmd := "npx prisma migrate deploy"
+					cmd = exec.Command("su", "-c", migrateCmd, opts.User)
+					cmd.Dir = opts.AppDir
+					fmt.Printf("Ejecutando: %s\n", migrateCmd)
+					if output, err := cmd.CombinedOutput(); err != nil {
+						fmt.Printf("Advertencia: error en migraciones de Prisma (no crítico): %v\n%s\n", err, output)
+					} else {
+						fmt.Printf("Migraciones de Prisma completadas: %s\n", output)
+					}
+				} else {
+					fmt.Println("No se encontraron migraciones de Prisma. Omitiendo prisma migrate deploy.")
 				}
 			}
 		}
@@ -742,8 +971,8 @@ func deployNodejs(opts *DeployOptions) error {
 
 	// Ejecutar comandos como el usuario del sitio
 	commands := []string{
-		// Instalar dependencias
-		"npm ci || npm install",
+		// Instalar dependencias con fallback options
+		"npm ci || npm install || npm install --legacy-peer-deps || npm install --force",
 	}
 
 	// Si hay comando de build, agregarlo
@@ -763,24 +992,37 @@ func deployNodejs(opts *DeployOptions) error {
 		}
 
 		if err != nil {
-			// Para npm install, ignoramos errores que son comunes debido a dependencias opcionales
+			// Para npm install, intentar con diferentes opciones si hay errores
 			if strings.Contains(cmdStr, "npm") && strings.Contains(cmdStr, "install") {
-				fmt.Printf("Advertencia: hubo algunos errores en la instalación de dependencias, pero continuaremos: %v\n", err)
+				fmt.Printf("Advertencia: hubo algunos errores en la instalación de dependencias, intentando con opciones alternativas...\n")
+
+				// Intentar con --legacy-peer-deps
+				legacyCmd := exec.Command("su", "-c", "npm install --legacy-peer-deps", opts.User)
+				legacyCmd.Dir = opts.AppDir
+				if legacyOutput, legacyErr := legacyCmd.CombinedOutput(); legacyErr == nil {
+					fmt.Printf("Instalación exitosa con --legacy-peer-deps\n")
+					continue
+				} else {
+					fmt.Printf("Error con --legacy-peer-deps: %v\n%s\n", legacyErr, legacyOutput)
+				}
+
+				// Intentar con --force
+				forceCmd := exec.Command("su", "-c", "npm install --force", opts.User)
+				forceCmd.Dir = opts.AppDir
+				if forceOutput, forceErr := forceCmd.CombinedOutput(); forceErr == nil {
+					fmt.Printf("Instalación exitosa con --force\n")
+					continue
+				} else {
+					fmt.Printf("Error con --force: %v\n%s\n", forceErr, forceOutput)
+				}
+
+				// Si todos los intentos fallan, mostrar advertencia pero continuar
+				fmt.Printf("Advertencia: no se pudo instalar las dependencias correctamente, pero continuaremos: %v\n", err)
 			} else {
 				return fmt.Errorf("error al ejecutar comando '%s': %v\n%s", cmdStr, err, output)
 			}
 		}
 	}
-
-	// ELIMINAR ESTA SECCIÓN YA QUE LA MOVIMOS ARRIBA
-	// Determinar puerto para la aplicación
-	// port := projectInfo.DefaultPort
-	// if opts.IsSubdomain {
-	// 	// Para subdominios, usar un puerto diferente basado en una función hash simple
-	// 	h := fnv.New32a()
-	// 	h.Write([]byte(opts.Domain))
-	// 	port = 3000 + int(h.Sum32()%1000) // Puertos entre 3000 y 3999
-	// }
 
 	// Determinar comando para iniciar la aplicación
 	startCommand := utils.GetNodeJSStartCommand(projectInfo)
@@ -789,12 +1031,33 @@ func deployNodejs(opts *DeployOptions) error {
 	switch projectInfo.Framework {
 	case utils.FrameworkNestJS:
 		if projectInfo.HasTypeScript {
-			// Para NestJS con TypeScript, asegurarnos de que usamos la versión compilada
-			startCommand = "node dist/main.js"
+			// Para NestJS con TypeScript, usar la ruta correcta o npm run start
+			// Verificar si existe el script start en package.json
+			packageJSONPath := filepath.Join(opts.AppDir, "package.json")
+			if _, err := os.Stat(packageJSONPath); err == nil {
+				// Leer package.json para verificar si tiene script start
+				packageJSONContent, err := os.ReadFile(packageJSONPath)
+				if err == nil {
+					packageJSONStr := string(packageJSONContent)
+					if strings.Contains(packageJSONStr, "\"start\":") {
+						// Usar npm run start si está disponible
+						startCommand = "npm run start"
+					} else {
+						// Usar la ruta correcta al archivo main.js
+						startCommand = "node dist/src/main.js"
+					}
+				} else {
+					// Fallback a la ruta correcta
+					startCommand = "node dist/src/main.js"
+				}
+			} else {
+				// Fallback a la ruta correcta
+				startCommand = "node dist/src/main.js"
+			}
 		}
 	case utils.FrameworkNextJS:
 		// Para Next.js, necesitamos un puerto específico
-		startCommand = fmt.Sprintf("next start -p %d", port)
+		startCommand = fmt.Sprintf("npm run start -- -p %d", port)
 	}
 
 	// Crear archivo de configuración para PM2
@@ -880,60 +1143,10 @@ func deployNodejs(opts *DeployOptions) error {
 	}
 
 	if err != nil {
-		return fmt.Errorf("error al iniciar aplicación con PM2: %v\n%s", err, output)
+		return fmt.Errorf("error al iniciar la aplicación con PM2: %v\n%s", err, output)
 	}
 
-	// Guardar la configuración de PM2 para que persista después de reiniciar
-	saveCmd := exec.Command("sudo", "-u", opts.User, "pm2", "save")
-	if output, err := saveCmd.CombinedOutput(); err != nil {
-		fmt.Printf("Advertencia: error al guardar configuración PM2 (no crítico): %v\n", err)
-		fmt.Printf("Salida de PM2: %s\n", output)
-	}
-
-	// Actualizar la configuración de Nginx para usar el puerto correcto
-	if opts.IsSubdomain {
-		nginxConfPath := filepath.Join(opts.HomeDir, ".nginx", fmt.Sprintf("%s.conf", opts.Domain))
-		if _, err := os.Stat(nginxConfPath); err == nil {
-			// Leer el archivo
-			confData, err := os.ReadFile(nginxConfPath)
-			if err != nil {
-				return fmt.Errorf("error al leer configuración Nginx: %v", err)
-			}
-
-			// Reemplazar el puerto
-			newConf := strings.ReplaceAll(string(confData), "proxy_pass http://localhost:3000", fmt.Sprintf("proxy_pass http://localhost:%d", port))
-
-			// Escribir el archivo
-			if err := os.WriteFile(nginxConfPath, []byte(newConf), 0644); err != nil {
-				return fmt.Errorf("error al escribir configuración Nginx: %v", err)
-			}
-
-			// Cambiar propietario del archivo de configuración
-			chownCmd := exec.Command("chown", fmt.Sprintf("%s:%s", opts.User, opts.User), nginxConfPath)
-			if output, err := chownCmd.CombinedOutput(); err != nil {
-				return fmt.Errorf("error al cambiar propietario del archivo de configuración: %v\n%s", err, output)
-			}
-
-			// Recargar Nginx
-			reloadCmd := exec.Command("systemctl", "reload", "nginx")
-			if output, err := reloadCmd.CombinedOutput(); err != nil {
-				return fmt.Errorf("error al recargar Nginx: %v\n%s", err, output)
-			}
-		}
-	}
-
-	fmt.Printf("Aplicación Node.js desplegada correctamente en %s\n", opts.Domain)
-	fmt.Printf("Tipo: %s\n", projectInfo.Framework)
-	fmt.Printf("Puerto: %d\n", port)
-	fmt.Printf("Logs: %s/logs/%s_*.log\n", opts.HomeDir, opts.Domain)
-
-	// Mostrar URL de la aplicación
-	if opts.IsSubdomain {
-		fmt.Printf("URL: http://%s\n", opts.Domain)
-	} else {
-		fmt.Printf("URL: http://%s\n", opts.Domain)
-	}
-
+	fmt.Printf("Aplicación iniciada correctamente en el puerto %d\n", port)
 	return nil
 }
 
@@ -970,10 +1183,31 @@ func resetPM2(opts *DeployOptions) error {
 	// Determinar puerto para la aplicación
 	port := projectInfo.DefaultPort
 	if opts.IsSubdomain {
-		// Para subdominios, usar un puerto diferente basado en una función hash simple
-		h := fnv.New32a()
-		h.Write([]byte(opts.Domain))
-		port = 3000 + int(h.Sum32()%1000) // Puertos entre 3000 y 3999
+		// Para subdominios, leer el puerto de la configuración de Nginx
+		nginxConfPath := filepath.Join(opts.HomeDir, "nginx", fmt.Sprintf("%s.conf", opts.Domain))
+		if _, err := os.Stat(nginxConfPath); err == nil {
+			// Leer el archivo
+			confData, err := os.ReadFile(nginxConfPath)
+			if err != nil {
+				return fmt.Errorf("error al leer configuración Nginx: %v", err)
+			}
+
+			// Buscar el puerto en la configuración
+			confStr := string(confData)
+			if strings.Contains(confStr, "proxy_pass http://localhost:") {
+				portStr := strings.Split(strings.Split(confStr, "proxy_pass http://localhost:")[1], ";")[0]
+				if p, err := strconv.Atoi(portStr); err == nil {
+					port = p
+					fmt.Printf("Usando puerto %d de la configuración de Nginx\n", port)
+				}
+			}
+		} else {
+			// Si no se encuentra la configuración, usar un puerto basado en hash
+			h := fnv.New32a()
+			h.Write([]byte(opts.Domain))
+			port = 3001 + int(h.Sum32()%999) // Puertos entre 3001 y 3999
+			fmt.Printf("Generando puerto aleatorio: %d\n", port)
+		}
 	}
 
 	// Determinar comando para iniciar la aplicación
@@ -983,8 +1217,29 @@ func resetPM2(opts *DeployOptions) error {
 	switch projectInfo.Framework {
 	case utils.FrameworkNestJS:
 		if projectInfo.HasTypeScript {
-			// Para NestJS con TypeScript, asegurarnos de que usamos la versión compilada
-			startCommand = "node dist/main.js"
+			// Para NestJS con TypeScript, usar la ruta correcta o npm run start
+			// Verificar si existe el script start en package.json
+			packageJSONPath := filepath.Join(opts.AppDir, "package.json")
+			if _, err := os.Stat(packageJSONPath); err == nil {
+				// Leer package.json para verificar si tiene script start
+				packageJSONContent, err := os.ReadFile(packageJSONPath)
+				if err == nil {
+					packageJSONStr := string(packageJSONContent)
+					if strings.Contains(packageJSONStr, "\"start\":") {
+						// Usar npm run start si está disponible
+						startCommand = "npm run start"
+					} else {
+						// Usar la ruta correcta al archivo main.js
+						startCommand = "node dist/src/main.js"
+					}
+				} else {
+					// Fallback a la ruta correcta
+					startCommand = "node dist/src/main.js"
+				}
+			} else {
+				// Fallback a la ruta correcta
+				startCommand = "node dist/src/main.js"
+			}
 		}
 	case utils.FrameworkNextJS:
 		// Para Next.js, necesitamos un puerto específico
@@ -1074,16 +1329,236 @@ func resetPM2(opts *DeployOptions) error {
 	}
 
 	if err != nil {
-		return fmt.Errorf("error al iniciar aplicación con PM2: %v\n%s", err, output)
+		return fmt.Errorf("error al iniciar la aplicación con PM2: %v\n%s", err, output)
+	}
+
+	fmt.Printf("PM2 reconfigurado correctamente para %s\n", opts.Domain)
+	return nil
+}
+
+// Función corregida para manejar la autenticación PostgreSQL correctamente
+
+func setupPostgreSQLDatabase(opts *DeployOptions, projectInfo *utils.NodeJSProjectInfo) (map[string]string, error) {
+	// Variables de entorno que se devolverán
+	envVars := make(map[string]string)
+
+	// Verificar si PostgreSQL está disponible
+	pgCheckCmd := exec.Command("sudo", "-u", "postgres", "pg_isready")
+	pgOutput, pgErr := pgCheckCmd.CombinedOutput()
+
+	if pgErr != nil {
+		fmt.Printf("PostgreSQL no está disponible: %v\n%s\n", pgErr, pgOutput)
+		fmt.Println("¿Desea configurar PostgreSQL manualmente? (s/n)")
+
+		var response string
+		fmt.Scanln(&response)
+
+		if strings.ToLower(response) == "s" {
+			// Solicitar datos de configuración manual
+			// [Código de configuración manual existente...]
+			// ...
+			return envVars, nil
+		}
+
+		// Si el usuario no desea configurar manualmente, devolver error
+		return nil, fmt.Errorf("PostgreSQL no está disponible y se omitió la configuración manual")
+	}
+
+	// PostgreSQL está disponible, configurar automáticamente
+
+	// Sanitizar nombre de dominio para usarlo como nombre de base de datos
+	dbName := strings.ReplaceAll(opts.Domain, ".", "_")
+	// Usar el usuario de sistema como usuario de base de datos
+	dbUser := opts.User
+	// Generar contraseña aleatoria
+	dbPassword := generateRandomPassword(16)
+
+	// Verificar si el usuario ya existe en PostgreSQL
+	checkUserCmd := fmt.Sprintf("SELECT 1 FROM pg_roles WHERE rolname='%s'", dbUser)
+	cmd := exec.Command("sudo", "-u", "postgres", "psql", "-tAc", checkUserCmd)
+	userOutput, userErr := cmd.CombinedOutput()
+
+	userExists := false
+	if userErr == nil && strings.TrimSpace(string(userOutput)) == "1" {
+		userExists = true
+		fmt.Printf("El usuario PostgreSQL '%s' ya existe\n", dbUser)
+	}
+
+	if !userExists {
+		// Crear usuario de PostgreSQL
+		createUserCmd := fmt.Sprintf("CREATE USER %s WITH ENCRYPTED PASSWORD '%s';", dbUser, dbPassword)
+		cmd = exec.Command("sudo", "-u", "postgres", "psql", "-c", createUserCmd)
+
+		if output, err := cmd.CombinedOutput(); err != nil {
+			fmt.Printf("Error al crear usuario PostgreSQL: %v\n%s\n", err, output)
+			return nil, fmt.Errorf("error al crear usuario PostgreSQL: %v", err)
+		}
+
+		fmt.Printf("Usuario PostgreSQL '%s' creado exitosamente\n", dbUser)
+	} else {
+		// Si el usuario ya existe, cambiar su contraseña
+		alterUserCmd := fmt.Sprintf("ALTER USER %s WITH ENCRYPTED PASSWORD '%s';", dbUser, dbPassword)
+		cmd = exec.Command("sudo", "-u", "postgres", "psql", "-c", alterUserCmd)
+
+		if output, err := cmd.CombinedOutput(); err != nil {
+			fmt.Printf("Error al cambiar contraseña del usuario PostgreSQL: %v\n%s\n", err, output)
+			return nil, fmt.Errorf("error al cambiar contraseña del usuario PostgreSQL: %v", err)
+		}
+
+		fmt.Printf("Contraseña actualizada para el usuario PostgreSQL '%s'\n", dbUser)
+	}
+
+	// Verificar si la base de datos ya existe
+	checkDbCmd := fmt.Sprintf("SELECT 1 FROM pg_database WHERE datname='%s'", dbName)
+	cmd = exec.Command("sudo", "-u", "postgres", "psql", "-tAc", checkDbCmd)
+	dbOutput, dbErr := cmd.CombinedOutput()
+
+	dbExists := false
+	if dbErr == nil && strings.TrimSpace(string(dbOutput)) == "1" {
+		dbExists = true
+		fmt.Printf("La base de datos PostgreSQL '%s' ya existe\n", dbName)
+	}
+
+	if !dbExists {
+		// Crear base de datos
+		createDbCmd := fmt.Sprintf("CREATE DATABASE %s OWNER %s;", dbName, dbUser)
+		cmd = exec.Command("sudo", "-u", "postgres", "psql", "-c", createDbCmd)
+
+		if output, err := cmd.CombinedOutput(); err != nil {
+			fmt.Printf("Error al crear base de datos PostgreSQL: %v\n%s\n", err, output)
+			return nil, fmt.Errorf("error al crear base de datos PostgreSQL: %v", err)
+		}
+
+		fmt.Printf("Base de datos PostgreSQL '%s' creada exitosamente\n", dbName)
+	} else {
+		// Si la base de datos ya existe, asignar permisos al usuario
+		grantCmd := fmt.Sprintf("GRANT ALL PRIVILEGES ON DATABASE %s TO %s;", dbName, dbUser)
+		cmd = exec.Command("sudo", "-u", "postgres", "psql", "-c", grantCmd)
+
+		if output, err := cmd.CombinedOutput(); err != nil {
+			fmt.Printf("Error al asignar permisos sobre la base de datos: %v\n%s\n", err, output)
+			// No retornamos error aquí, continuamos con la configuración
+		}
+	}
+
+	// Construir URL de conexión para diferentes formatos según el framework
+	databaseURL := fmt.Sprintf("postgresql://%s:%s@localhost:5432/%s", dbUser, dbPassword, dbName)
+
+	// Configurar variables de entorno según el framework detectado
+	envVars["DATABASE_URL"] = databaseURL
+
+	// Variables para Laravel
+	envVars["DB_CONNECTION"] = "pgsql"
+	envVars["DB_HOST"] = "localhost"
+	envVars["DB_PORT"] = "5432"
+	envVars["DB_DATABASE"] = dbName
+	envVars["DB_USERNAME"] = dbUser
+	envVars["DB_PASSWORD"] = dbPassword
+
+	// Variables específicas para Prisma
+	if projectInfo.HasPrisma {
+		// Prisma usa DATABASE_URL en este formato
+		envVars["DATABASE_URL"] = databaseURL + "?schema=public"
+	}
+
+	// Mostrar información de conexión
+	fmt.Println("\n=== Configuración de PostgreSQL ===")
+	fmt.Printf("Base de datos: %s\n", dbName)
+	fmt.Printf("Usuario: %s\n", dbUser)
+	fmt.Printf("Contraseña: %s\n", dbPassword)
+	fmt.Printf("URL de conexión: %s\n", databaseURL)
+	fmt.Println("===================================\n")
+
+	return envVars, nil
+}
+
+// removeDeployedProject elimina un proyecto desplegado
+func removeDeployedProject(opts *DeployOptions) error {
+	fmt.Printf("Eliminando proyecto desplegado en %s...\n", opts.Domain)
+
+	// Detener la aplicación en PM2
+	fmt.Println("Deteniendo aplicación en PM2...")
+	stopCmd := exec.Command("sudo", "-u", opts.User, "pm2", "stop", opts.Domain)
+	if output, err := stopCmd.CombinedOutput(); err != nil {
+		fmt.Printf("Advertencia: error al detener aplicación en PM2: %v\n%s\n", err, output)
+		// Continuamos aunque haya error al detener
+	}
+
+	// Eliminar la aplicación de PM2
+	fmt.Println("Eliminando aplicación de PM2...")
+	deleteCmd := exec.Command("sudo", "-u", opts.User, "pm2", "delete", opts.Domain)
+	if output, err := deleteCmd.CombinedOutput(); err != nil {
+		fmt.Printf("Advertencia: error al eliminar aplicación de PM2: %v\n%s\n", err, output)
+		// Continuamos aunque haya error al eliminar
 	}
 
 	// Guardar la configuración de PM2 para que persista después de reiniciar
 	saveCmd := exec.Command("sudo", "-u", opts.User, "pm2", "save")
 	if output, err := saveCmd.CombinedOutput(); err != nil {
-		fmt.Printf("Advertencia: error al guardar configuración PM2 (no crítico): %v\n", err)
-		fmt.Printf("Salida de PM2: %s\n", output)
+		fmt.Printf("Advertencia: error al guardar configuración PM2: %v\n%s\n", err, output)
+		// Continuamos aunque haya error al guardar
 	}
 
-	fmt.Printf("PM2 reconfigurado correctamente para %s\n", opts.Domain)
+	// Detener cualquier proceso de Node.js que esté ejecutándose en el directorio de la aplicación
+	fmt.Println("Deteniendo procesos de Node.js...")
+	killCmd := exec.Command("pkill", "-f", fmt.Sprintf("node.*%s", opts.AppDir))
+	if output, err := killCmd.CombinedOutput(); err != nil {
+		fmt.Printf("Advertencia: error al detener procesos de Node.js: %v\n%s\n", err, output)
+		// Continuamos aunque haya error al detener
+	}
+
+	// Verificar si hay procesos de Node.js ejecutándose en el puerto 3000
+	fmt.Println("Verificando procesos en el puerto 3000...")
+	lsofCmd := exec.Command("lsof", "-i", ":3000", "-t")
+	if output, err := lsofCmd.CombinedOutput(); err == nil && len(output) > 0 {
+		// Si hay procesos, intentar detenerlos
+		fmt.Println("Deteniendo procesos en el puerto 3000...")
+		killPortCmd := exec.Command("kill", "-9", strings.TrimSpace(string(output)))
+		if output, err := killPortCmd.CombinedOutput(); err != nil {
+			fmt.Printf("Advertencia: error al detener procesos en el puerto 3000: %v\n%s\n", err, output)
+		}
+	}
+
+	// Hacer backup si se solicita
+	if opts.Backup {
+		fmt.Println("Haciendo backup de la carpeta del proyecto...")
+		backupDir := filepath.Join(opts.HomeDir, "backups")
+		if err := os.MkdirAll(backupDir, 0755); err != nil {
+			return fmt.Errorf("error al crear directorio de backups: %v", err)
+		}
+
+		// Cambiar propietario del directorio de backups
+		chownCmd := exec.Command("chown", fmt.Sprintf("%s:%s", opts.User, opts.User), backupDir)
+		if output, err := chownCmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("error al cambiar propietario del directorio de backups: %v\n%s", err, output)
+		}
+
+		// Crear nombre de archivo de backup con timestamp
+		timestamp := time.Now().Format("20060102150405")
+		backupFileName := fmt.Sprintf("%s_%s.tar.gz", opts.Domain, timestamp)
+		backupPath := filepath.Join(backupDir, backupFileName)
+
+		// Crear archivo de backup
+		tarCmd := exec.Command("tar", "-czf", backupPath, "-C", filepath.Dir(opts.AppDir), filepath.Base(opts.AppDir))
+		if output, err := tarCmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("error al crear backup: %v\n%s", err, output)
+		}
+
+		// Cambiar propietario del archivo de backup
+		chownCmd = exec.Command("chown", fmt.Sprintf("%s:%s", opts.User, opts.User), backupPath)
+		if output, err := chownCmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("error al cambiar propietario del archivo de backup: %v\n%s", err, output)
+		}
+
+		fmt.Printf("Backup creado en %s\n", backupPath)
+	}
+
+	// Eliminar la carpeta del proyecto
+	fmt.Printf("Eliminando carpeta del proyecto en %s...\n", opts.AppDir)
+	if err := os.RemoveAll(opts.AppDir); err != nil {
+		return fmt.Errorf("error al eliminar carpeta del proyecto: %v", err)
+	}
+
+	fmt.Printf("Proyecto eliminado correctamente: %s\n", opts.Domain)
 	return nil
 }

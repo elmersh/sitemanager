@@ -19,6 +19,7 @@ type SecureOptions struct {
 	Email   string
 	User    string
 	HomeDir string
+	Force   bool
 }
 
 // AddSecureCommand agrega el comando secure al comando raíz
@@ -50,9 +51,25 @@ func AddSecureCommand(rootCmd *cobra.Command, cfg *config.Config) {
 				return fmt.Errorf("el sitio %s no existe, primero crea el sitio con 'sm site'", opts.Domain)
 			}
 
-			// Obtener certificado SSL con Certbot
-			if err := obtainSSLCertificate(&opts); err != nil {
-				return err
+			// Verificar si los certificados ya existen
+			certPath := fmt.Sprintf("/etc/letsencrypt/live/%s/fullchain.pem", opts.Domain)
+			if _, err := os.Stat(certPath); err == nil && !opts.Force {
+				fmt.Printf("Los certificados SSL ya existen para %s. Use --force para regenerarlos.\n", opts.Domain)
+			} else {
+				// Obtener certificado SSL con Certbot
+				if err := obtainSSLCertificate(&opts); err != nil {
+					return err
+				}
+			}
+
+			// Verificar si la configuración de Nginx ya tiene SSL
+			nginxDir := filepath.Join(opts.HomeDir, "nginx")
+			confFile := filepath.Join(nginxDir, fmt.Sprintf("%s.conf", opts.Domain))
+			if currentConfig, err := os.ReadFile(confFile); err == nil {
+				if strings.Contains(string(currentConfig), "ssl_certificate") && !opts.Force {
+					fmt.Printf("La configuración de Nginx ya tiene SSL para %s. Use --force para actualizarla.\n", opts.Domain)
+					return nil
+				}
 			}
 
 			// Actualizar configuración de Nginx para usar SSL
@@ -73,6 +90,7 @@ func AddSecureCommand(rootCmd *cobra.Command, cfg *config.Config) {
 	// Agregar flags
 	secureCmd.Flags().StringVarP(&opts.Domain, "domain", "d", "", "Dominio del sitio (obligatorio)")
 	secureCmd.Flags().StringVarP(&opts.Email, "email", "e", "", "Email para Let's Encrypt (obligatorio)")
+	secureCmd.Flags().BoolVar(&opts.Force, "force", false, "Forzar la regeneración de certificados SSL y actualización de configuración")
 
 	// Marcar flags obligatorios
 	secureCmd.MarkFlagRequired("domain")
@@ -95,11 +113,60 @@ func AddSecureCommand(rootCmd *cobra.Command, cfg *config.Config) {
 
 // siteExists verifica si el sitio existe
 func siteExists(domain string, cfg *config.Config) bool {
+	// Verificar si es un subdominio
+	domainParts := strings.Split(domain, ".")
+	var homeDir string
+	var parentDomain string
+
+	if len(domainParts) > 2 && domainParts[0] != "www" {
+		// Es un subdominio, verificar si existe el dominio principal
+		parentDomain = strings.Join(domainParts[1:], ".")
+		parentConfFile := filepath.Join(cfg.SitesAvailable, fmt.Sprintf("%s.conf", parentDomain))
+		if _, err := os.Stat(parentConfFile); os.IsNotExist(err) {
+			fmt.Printf("El dominio principal %s no existe\n", parentDomain)
+			return false
+		}
+		homeDir = filepath.Join("/home", parentDomain)
+	} else {
+		homeDir = filepath.Join("/home", domain)
+	}
+
+	// Verificar si existe el directorio del sitio
+	if _, err := os.Stat(homeDir); os.IsNotExist(err) {
+		fmt.Printf("El directorio %s no existe\n", homeDir)
+		return false
+	}
+
 	// Verificar si existe el archivo de configuración en sites-available
 	confFile := filepath.Join(cfg.SitesAvailable, fmt.Sprintf("%s.conf", domain))
 	if _, err := os.Stat(confFile); os.IsNotExist(err) {
+		fmt.Printf("El archivo de configuración %s no existe\n", confFile)
 		return false
 	}
+
+	// Verificar si existe el directorio nginx
+	nginxDir := filepath.Join(homeDir, "nginx")
+	if _, err := os.Stat(nginxDir); os.IsNotExist(err) {
+		fmt.Printf("El directorio nginx %s no existe\n", nginxDir)
+		return false
+	}
+
+	// Verificar si existe el archivo de configuración en nginx
+	nginxConfFile := filepath.Join(nginxDir, fmt.Sprintf("%s.conf", domain))
+	if _, err := os.Stat(nginxConfFile); os.IsNotExist(err) {
+		fmt.Printf("El archivo de configuración nginx %s no existe\n", nginxConfFile)
+		return false
+	}
+
+	// Para subdominios, verificar si existe el directorio apps
+	if len(domainParts) > 2 && domainParts[0] != "www" {
+		appsDir := filepath.Join(homeDir, "apps")
+		if _, err := os.Stat(appsDir); os.IsNotExist(err) {
+			fmt.Printf("El directorio apps %s no existe\n", appsDir)
+			return false
+		}
+	}
+
 	return true
 }
 
@@ -112,11 +179,34 @@ func obtainSSLCertificate(opts *SecureOptions) error {
 		return fmt.Errorf("certbot no está instalado, instálalo primero")
 	}
 
+	// Crear y configurar el directorio para el desafío ACME
+	webrootPath := filepath.Join(opts.HomeDir, "public_html")
+	acmePath := filepath.Join(webrootPath, ".well-known", "acme-challenge")
+	if err := os.MkdirAll(acmePath, 0755); err != nil {
+		return fmt.Errorf("error al crear directorio para desafío ACME: %v", err)
+	}
+
+	// Asegurar que los permisos son correctos en toda la ruta
+	if err := exec.Command("chmod", "-R", "755", webrootPath).Run(); err != nil {
+		return fmt.Errorf("error al configurar permisos del webroot: %v", err)
+	}
+
+	// Asegurar que el propietario es correcto
+	if err := exec.Command("chown", "-R", fmt.Sprintf("%s:www-data", opts.User), webrootPath).Run(); err != nil {
+		return fmt.Errorf("error al configurar propietario del webroot: %v", err)
+	}
+
+	// Asegurar que el directorio padre tiene los permisos correctos para que www-data pueda acceder
+	homeDir := filepath.Dir(webrootPath)
+	if err := exec.Command("chmod", "755", homeDir).Run(); err != nil {
+		return fmt.Errorf("error al configurar permisos del directorio padre: %v", err)
+	}
+
 	// Ejecutar Certbot en modo webroot
 	cmd := exec.Command(
 		"certbot", "certonly",
 		"--webroot",
-		"--webroot-path", filepath.Join(opts.HomeDir, "public_html"),
+		"--webroot-path", webrootPath,
 		"--email", opts.Email,
 		"--domain", opts.Domain,
 		"--agree-tos",
@@ -134,7 +224,7 @@ func obtainSSLCertificate(opts *SecureOptions) error {
 // updateNginxConfigWithSSL actualiza la configuración de Nginx para usar SSL
 func updateNginxConfigWithSSL(opts *SecureOptions, cfg *config.Config) error {
 	// Leer la plantilla SSL
-	tmplPath := "templates/ssl/ssl.conf.tmpl"
+	tmplPath := "ssl/ssl.conf.tmpl"
 	tmplContent, err := utils.ReadTemplateFile(tmplPath)
 	if err != nil {
 		return err
@@ -156,7 +246,7 @@ func updateNginxConfigWithSSL(opts *SecureOptions, cfg *config.Config) error {
 	}
 
 	// Archivo de configuración actual
-	nginxDir := filepath.Join(opts.HomeDir, ".nginx")
+	nginxDir := filepath.Join(opts.HomeDir, "nginx")
 	confFile := filepath.Join(nginxDir, fmt.Sprintf("%s.conf", opts.Domain))
 
 	// Leer configuración actual
