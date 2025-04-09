@@ -560,12 +560,57 @@ func deployLaravel(opts *DeployOptions) error {
 		return fmt.Errorf("error al cambiar propietario: %v\n%s", err, output)
 	}
 
+	// Configurar permisos específicos para storage y bootstrap/cache
+	storageDir := filepath.Join(opts.AppDir, "storage")
+	bootstrapCacheDir := filepath.Join(opts.AppDir, "bootstrap/cache")
+
+	// Dar permisos recursivos a storage
+	chmodCmd := exec.Command("chmod", "-R", "775", storageDir)
+	if output, err := chmodCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("error al configurar permisos de storage: %v\n%s", err, output)
+	}
+
+	// Dar permisos recursivos a bootstrap/cache
+	chmodCmd = exec.Command("chmod", "-R", "775", bootstrapCacheDir)
+	if output, err := chmodCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("error al configurar permisos de bootstrap/cache: %v\n%s", err, output)
+	}
+
+	// Copiar .env.example a .env si no existe
+	envExamplePath := filepath.Join(opts.AppDir, ".env.example")
+	envPath := filepath.Join(opts.AppDir, ".env")
+
+	if _, err := os.Stat(envPath); os.IsNotExist(err) {
+		if _, err := os.Stat(envExamplePath); err == nil {
+			// Leer el contenido del archivo .env.example
+			envContent, err := os.ReadFile(envExamplePath)
+			if err != nil {
+				return fmt.Errorf("error al leer .env.example: %v", err)
+			}
+
+			// Modificar las variables específicas
+			envStr := string(envContent)
+			envStr = strings.ReplaceAll(envStr, "APP_NAME=Laravel", fmt.Sprintf("APP_NAME=%s", opts.Domain))
+			envStr = strings.ReplaceAll(envStr, "APP_ENV=local", fmt.Sprintf("APP_ENV=%s", opts.Environment))
+			envStr = strings.ReplaceAll(envStr, "APP_DEBUG=true", "APP_DEBUG=false")
+
+			// Escribir el archivo .env modificado
+			if err := os.WriteFile(envPath, []byte(envStr), 0644); err != nil {
+				return fmt.Errorf("error al escribir .env: %v", err)
+			}
+
+			// Cambiar propietario del archivo .env
+			chownCmd := exec.Command("chown", fmt.Sprintf("%s:%s", opts.User, opts.User), envPath)
+			if output, err := chownCmd.CombinedOutput(); err != nil {
+				return fmt.Errorf("error al cambiar propietario de .env: %v\n%s", err, output)
+			}
+		}
+	}
+
 	// Ejecutar comandos como el usuario del sitio
 	commands := []string{
-		// Instalar dependencias
-		"composer install --no-dev --optimize-autoloader",
-		// Copiar .env.example a .env si no existe
-		"[ -f .env ] || cp .env.example .env",
+		// Instalar dependencias con feedback
+		"composer install --no-dev --optimize-autoloader --no-interaction --prefer-dist",
 		// Generar clave de aplicación
 		"php artisan key:generate",
 		// Crear enlace simbólico para storage
