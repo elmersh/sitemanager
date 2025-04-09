@@ -69,7 +69,7 @@ func AddSiteCommand(rootCmd *cobra.Command, cfg *config.Config) {
 				opts.HomeDir = filepath.Join("/home", opts.Domain)
 			}
 
-			opts.NginxDir = filepath.Join(opts.HomeDir, ".nginx")
+			opts.NginxDir = filepath.Join(opts.HomeDir, "nginx")
 			opts.Port = port
 
 			// Crear usuario y directorios
@@ -145,7 +145,7 @@ func createUserAndDirs(opts *SiteOptions) error {
 		}
 	}
 
-	// Crear directorio .nginx si no existe
+	// Crear directorio nginx si no existe
 	if err := os.MkdirAll(opts.NginxDir, 0755); err != nil {
 		return fmt.Errorf("error al crear directorio Nginx: %v", err)
 	}

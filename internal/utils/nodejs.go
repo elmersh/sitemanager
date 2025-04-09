@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -48,150 +49,231 @@ type NodeJSProjectInfo struct {
 }
 
 // DetectNodeJSFramework detecta el framework de Node.js utilizado en un proyecto
-func DetectNodeJSFramework(projectDir string) (*NodeJSProjectInfo, error) {
+// Mejora de la función DetectNodeJSFramework en internal/utils/nodejs.go
+
+// DetectNodeJSFramework detecta el framework y características de un proyecto Node.js
+func DetectNodeJSFramework(appDir string) (*NodeJSProjectInfo, error) {
+	// Información del proyecto
 	info := &NodeJSProjectInfo{
 		Framework:        FrameworkUnknown,
-		MainFile:         "",
-		HasTypeScript:    false,
-		BuildCommand:     "",
-		StartCommand:     "",
-		DevCommand:       "",
-		HasPrisma:        false,
-		RequiresEnv:      false,
-		EnvVars:          make(map[string]string),
 		DefaultPort:      3000,
-		HasPackageJSON:   false,
-		HasNodeModules:   false,
+		RequiresEnv:      false,
 		RequiresDatabase: false,
 		DBType:           "",
+		EnvVars:          make(map[string]string),
+		HasTypeScript:    false,
+		HasPrisma:        false,
 	}
 
 	// Verificar si hay package.json
-	packageJSONPath := filepath.Join(projectDir, "package.json")
-	if _, err := os.Stat(packageJSONPath); err == nil {
-		info.HasPackageJSON = true
+	packagePath := filepath.Join(appDir, "package.json")
+	if _, err := os.Stat(packagePath); os.IsNotExist(err) {
+		return info, fmt.Errorf("no se encontró package.json")
+	}
 
-		// Leer package.json
-		packageJSONData, err := os.ReadFile(packageJSONPath)
-		if err != nil {
-			return nil, fmt.Errorf("error al leer package.json: %v", err)
-		}
+	// Leer package.json
+	packageData, err := os.ReadFile(packagePath)
+	if err != nil {
+		return info, fmt.Errorf("error al leer package.json: %v", err)
+	}
 
-		var packageJSON map[string]interface{}
-		if err := json.Unmarshal(packageJSONData, &packageJSON); err != nil {
-			return nil, fmt.Errorf("error al parsear package.json: %v", err)
-		}
+	// Parsear package.json
+	var packageJSON map[string]interface{}
+	if err := json.Unmarshal(packageData, &packageJSON); err != nil {
+		return info, fmt.Errorf("error al parsear package.json: %v", err)
+	}
 
-		// Verificar el main file
-		if main, ok := packageJSON["main"].(string); ok && main != "" {
-			info.MainFile = main
-		}
-
-		// Verificar scripts
-		if scripts, ok := packageJSON["scripts"].(map[string]interface{}); ok {
-			if build, ok := scripts["build"].(string); ok {
-				info.BuildCommand = build
-			}
-			if start, ok := scripts["start"].(string); ok {
-				info.StartCommand = start
-			}
-			if dev, ok := scripts["dev"].(string); ok {
-				info.DevCommand = dev
-			}
-		}
-
-		// Verificar dependencias para determinar el framework
-		if deps, ok := packageJSON["dependencies"].(map[string]interface{}); ok {
-			// Detectar NestJS
-			if _, ok := deps["@nestjs/core"]; ok {
-				info.Framework = FrameworkNestJS
-				info.DefaultPort = 3000
-			}
-
-			// Detectar Next.js
-			if _, ok := deps["next"]; ok {
-				info.Framework = FrameworkNextJS
-				info.DefaultPort = 3000
-			}
-
-			// Detectar Express.js
-			if _, ok := deps["express"]; ok && info.Framework == FrameworkUnknown {
-				info.Framework = FrameworkExpress
-				info.DefaultPort = 3000
-			}
-
-			// Detectar React.js
-			if _, ok := deps["react"]; ok && info.Framework == FrameworkUnknown {
-				info.Framework = FrameworkReactJS
-				info.DefaultPort = 3000
-			}
-
-			// Detectar Vue.js
-			if _, ok := deps["vue"]; ok && info.Framework == FrameworkUnknown {
-				info.Framework = FrameworkVueJS
-				info.DefaultPort = 8080
-			}
-
-			// Detectar Nuxt.js
-			if _, ok := deps["nuxt"]; ok {
-				info.Framework = FrameworkNuxtJS
-				info.DefaultPort = 3000
-			}
-
-			// Detectar Prisma
-			if _, ok := deps["@prisma/client"]; ok {
-				info.HasPrisma = true
-				info.RequiresDatabase = true
-				info.DBType = "postgresql" // Por defecto, puede ser cambiado después
-			}
-		}
-
-		// Verificar devDependencies
-		if devDeps, ok := packageJSON["devDependencies"].(map[string]interface{}); ok {
-			// Verificar TypeScript
-			if _, ok := devDeps["typescript"]; ok {
-				info.HasTypeScript = true
-			}
-
-			// Detectar Prisma en devDependencies
-			if _, ok := devDeps["prisma"]; ok {
-				info.HasPrisma = true
-				info.RequiresDatabase = true
-			}
+	// Detectar si usa TypeScript
+	if deps, ok := packageJSON["dependencies"].(map[string]interface{}); ok {
+		if _, exists := deps["typescript"]; exists {
+			info.HasTypeScript = true
 		}
 	}
 
-	// Verificar si hay node_modules
-	nodeModulesPath := filepath.Join(projectDir, "node_modules")
-	if _, err := os.Stat(nodeModulesPath); err == nil {
-		info.HasNodeModules = true
+	if devDeps, ok := packageJSON["devDependencies"].(map[string]interface{}); ok {
+		if _, exists := devDeps["typescript"]; exists {
+			info.HasTypeScript = true
+		}
 	}
 
-	// Verificar archivos tsconfig.json para confirmar TypeScript
-	tsconfigPath := filepath.Join(projectDir, "tsconfig.json")
-	if _, err := os.Stat(tsconfigPath); err == nil {
+	// Verificar si hay tsconfig.json (otra forma de detectar TypeScript)
+	if _, err := os.Stat(filepath.Join(appDir, "tsconfig.json")); err == nil {
 		info.HasTypeScript = true
 	}
 
-	// Verificar archivos .env.example o .env para determinar variables de entorno
-	envExamplePath := filepath.Join(projectDir, ".env.example")
-	envPath := filepath.Join(projectDir, ".env")
+	// Detectar NestJS
+	if deps, ok := packageJSON["dependencies"].(map[string]interface{}); ok {
+		if _, exists := deps["@nestjs/core"]; exists {
+			info.Framework = FrameworkNestJS
+			info.DefaultPort = 3000
+			info.RequiresEnv = true
+		}
+	}
 
-	var envFileToRead string
-	if _, err := os.Stat(envExamplePath); err == nil {
-		envFileToRead = envExamplePath
-		info.RequiresEnv = true
-	} else if _, err := os.Stat(envPath); err == nil {
-		envFileToRead = envPath
+	// Detectar NextJS
+	if deps, ok := packageJSON["dependencies"].(map[string]interface{}); ok {
+		if _, exists := deps["next"]; exists {
+			info.Framework = FrameworkNextJS
+			info.DefaultPort = 3000
+			info.RequiresEnv = true
+		}
+	}
+
+	// Detectar Express
+	if deps, ok := packageJSON["dependencies"].(map[string]interface{}); ok {
+		if _, exists := deps["express"]; exists && info.Framework == FrameworkUnknown {
+			info.Framework = FrameworkExpress
+			info.DefaultPort = 3000
+			info.RequiresEnv = true
+		}
+	}
+
+	// Detectar Prisma
+	if deps, ok := packageJSON["dependencies"].(map[string]interface{}); ok {
+		if _, exists := deps["@prisma/client"]; exists {
+			info.HasPrisma = true
+			info.RequiresDatabase = true
+
+			// Detectar tipo de base de datos para Prisma
+			prismaSchemaPath := filepath.Join(appDir, "prisma", "schema.prisma")
+			if _, err := os.Stat(prismaSchemaPath); err == nil {
+				// Leer schema.prisma
+				schemaData, err := os.ReadFile(prismaSchemaPath)
+				if err == nil {
+					schemaContent := string(schemaData)
+
+					// Detectar PostgreSQL
+					if strings.Contains(schemaContent, "provider = \"postgresql\"") {
+						info.DBType = "postgresql"
+					} else if strings.Contains(schemaContent, "provider = \"mysql\"") {
+						info.DBType = "mysql"
+					} else if strings.Contains(schemaContent, "provider = \"sqlite\"") {
+						info.DBType = "sqlite"
+					} else if strings.Contains(schemaContent, "provider = \"mongodb\"") {
+						info.DBType = "mongodb"
+					}
+				}
+			}
+		}
+	}
+
+	if devDeps, ok := packageJSON["devDependencies"].(map[string]interface{}); ok {
+		if _, exists := devDeps["prisma"]; exists {
+			info.HasPrisma = true
+			info.RequiresDatabase = true
+		}
+	}
+
+	// Verificar más detalladamente el tipo de base de datos
+	// Si se detectó Prisma pero no se pudo determinar el tipo de base de datos
+	if info.HasPrisma && info.DBType == "" {
+		// Buscar en archivo .env.example o .env si existe
+		envExamplePath := filepath.Join(appDir, ".env.example")
+		envPath := filepath.Join(appDir, ".env")
+
+		var envContent string
+
+		// Intentar leer .env.example primero
+		if _, err := os.Stat(envExamplePath); err == nil {
+			if data, err := os.ReadFile(envExamplePath); err == nil {
+				envContent = string(data)
+			}
+		}
+
+		// Si no encontramos .env.example, intentar con .env
+		if envContent == "" {
+			if _, err := os.Stat(envPath); err == nil {
+				if data, err := os.ReadFile(envPath); err == nil {
+					envContent = string(data)
+				}
+			}
+		}
+
+		// Buscar DATABASE_URL en el contenido
+		if envContent != "" {
+			lines := strings.Split(envContent, "\n")
+			for _, line := range lines {
+				line = strings.TrimSpace(line)
+				if strings.HasPrefix(line, "DATABASE_URL=") || strings.HasPrefix(line, "DATABASE_URL =") {
+					value := strings.SplitN(line, "=", 2)[1]
+					value = strings.TrimSpace(value)
+
+					// Eliminar comillas si las hay
+					if (strings.HasPrefix(value, "\"") && strings.HasSuffix(value, "\"")) ||
+						(strings.HasPrefix(value, "'") && strings.HasSuffix(value, "'")) {
+						value = value[1 : len(value)-1]
+					}
+
+					// Detectar tipo de base de datos por la URL
+					if strings.HasPrefix(value, "postgresql://") {
+						info.DBType = "postgresql"
+					} else if strings.HasPrefix(value, "mysql://") {
+						info.DBType = "mysql"
+					} else if strings.HasPrefix(value, "file:") || strings.HasPrefix(value, "sqlite:") {
+						info.DBType = "sqlite"
+					} else if strings.HasPrefix(value, "mongodb://") {
+						info.DBType = "mongodb"
+					}
+
+					break
+				}
+			}
+		}
+	}
+
+	// Detectar base de datos por otras dependencias si aún no se ha detectado
+	if !info.RequiresDatabase {
+		if deps, ok := packageJSON["dependencies"].(map[string]interface{}); ok {
+			// PostgreSQL
+			if _, exists := deps["pg"]; exists {
+				info.RequiresDatabase = true
+				info.DBType = "postgresql"
+			} else if _, exists := deps["postgres"]; exists {
+				info.RequiresDatabase = true
+				info.DBType = "postgresql"
+			} else if _, exists := deps["postgresql"]; exists {
+				info.RequiresDatabase = true
+				info.DBType = "postgresql"
+			} else if _, exists := deps["mysql"]; exists {
+				info.RequiresDatabase = true
+				info.DBType = "mysql"
+			} else if _, exists := deps["mysql2"]; exists {
+				info.RequiresDatabase = true
+				info.DBType = "mysql"
+			} else if _, exists := deps["sqlite"]; exists {
+				info.RequiresDatabase = true
+				info.DBType = "sqlite"
+			} else if _, exists := deps["sqlite3"]; exists {
+				info.RequiresDatabase = true
+				info.DBType = "sqlite"
+			} else if _, exists := deps["mongodb"]; exists {
+				info.RequiresDatabase = true
+				info.DBType = "mongodb"
+			} else if _, exists := deps["mongoose"]; exists {
+				info.RequiresDatabase = true
+				info.DBType = "mongodb"
+			}
+		}
+	}
+
+	// Verificar si hay archivos .env o .env.example
+	if _, err := os.Stat(filepath.Join(appDir, ".env")); err == nil {
 		info.RequiresEnv = true
 	}
 
-	if envFileToRead != "" {
-		// Leer archivo .env o .env.example
-		envData, err := os.ReadFile(envFileToRead)
+	if _, err := os.Stat(filepath.Join(appDir, ".env.example")); err == nil {
+		info.RequiresEnv = true
+	}
+
+	// Leer variables de .env.example si existe
+	envExamplePath := filepath.Join(appDir, ".env.example")
+	if _, err := os.Stat(envExamplePath); err == nil {
+		// Leer el archivo .env.example
+		data, err := os.ReadFile(envExamplePath)
 		if err == nil {
-			envLines := strings.Split(string(envData), "\n")
-			for _, line := range envLines {
+			// Parsear variables
+			lines := strings.Split(string(data), "\n")
+			for _, line := range lines {
 				line = strings.TrimSpace(line)
 				if line == "" || strings.HasPrefix(line, "#") {
 					continue
@@ -201,111 +283,197 @@ func DetectNodeJSFramework(projectDir string) (*NodeJSProjectInfo, error) {
 				if len(parts) == 2 {
 					key := strings.TrimSpace(parts[0])
 					value := strings.TrimSpace(parts[1])
-					// Quitar comillas si existen
-					value = strings.Trim(value, "\"'")
+
+					// Eliminar comillas si las hay
+					if (strings.HasPrefix(value, "\"") && strings.HasSuffix(value, "\"")) ||
+						(strings.HasPrefix(value, "'") && strings.HasSuffix(value, "'")) {
+						value = value[1 : len(value)-1]
+					}
+
 					info.EnvVars[key] = value
-
-					// Detectar puerto
-					if key == "PORT" {
-						if port, err := fmt.Sscanf(value, "%d", &info.DefaultPort); err != nil || port == 0 {
-							// Si no se puede parsear, mantener el valor por defecto
-						}
-					}
-
-					// Detectar variables de base de datos
-					if key == "DATABASE_URL" {
-						info.RequiresDatabase = true
-						// Intentar determinar el tipo de BD
-						if strings.Contains(value, "postgresql") {
-							info.DBType = "postgresql"
-						} else if strings.Contains(value, "mysql") {
-							info.DBType = "mysql"
-						} else if strings.Contains(value, "mongodb") {
-							info.DBType = "mongodb"
-						}
-					}
 				}
 			}
 		}
-	}
-
-	// Si no se ha detectado un framework pero hay archivo main, establecer como Express genérico
-	if info.Framework == FrameworkUnknown && info.MainFile != "" {
-		info.Framework = FrameworkExpress
-	}
-
-	// Si estamos utilizando NestJS, buscar el archivo main.js o main.ts
-	if info.Framework == FrameworkNestJS {
-		// Verificar estructuras de directorios típicas de NestJS
-		possibleMainFiles := []string{
-			filepath.Join(projectDir, "src", "main.ts"),
-			filepath.Join(projectDir, "src", "main.js"),
-			filepath.Join(projectDir, "dist", "main.js"),
-		}
-
-		for _, file := range possibleMainFiles {
-			if _, err := os.Stat(file); err == nil {
-				// Encontrado el archivo principal
-				if strings.HasSuffix(file, ".ts") {
-					info.MainFile = strings.TrimPrefix(file, projectDir+"/")
-				} else if strings.HasSuffix(file, ".js") {
-					// Para archivos JS, preferir la versión compilada en dist
-					if strings.Contains(file, "/dist/") {
-						info.MainFile = strings.TrimPrefix(file, projectDir+"/")
-					}
-				}
-			}
-		}
-	}
-
-	// Para NextJS, no necesitamos un archivo principal explícito
-	if info.Framework == FrameworkNextJS {
-		info.MainFile = ""
 	}
 
 	return info, nil
 }
 
-// ConfigureNodeJSEnv configura el archivo .env para un proyecto Node.js
-func ConfigureNodeJSEnv(projectDir string, info *NodeJSProjectInfo, userEnvVars map[string]string) error {
-	// Si el proyecto no requiere variables de entorno, no hacer nada
-	if !info.RequiresEnv {
-		return nil
-	}
+// ConfigureNodeJSEnv configura el archivo .env para una aplicación Node.js
+func ConfigureNodeJSEnv(appDir string, projectInfo *NodeJSProjectInfo, userValues map[string]string) error {
+	// Ruta del archivo .env.example
+	examplePath := filepath.Join(appDir, ".env.example")
 
-	// Combinar variables de entorno del proyecto con las proporcionadas por el usuario
+	// Ruta del archivo .env
+	envPath := filepath.Join(appDir, ".env")
+
+	// Variables a configurar
 	envVars := make(map[string]string)
-	for k, v := range info.EnvVars {
-		envVars[k] = v
-	}
-	for k, v := range userEnvVars {
-		envVars[k] = v
+
+	// Si ya existe un archivo .env, leerlo primero
+	if _, err := os.Stat(envPath); err == nil {
+		// El archivo .env ya existe, leerlo
+		data, err := os.ReadFile(envPath)
+		if err != nil {
+			return fmt.Errorf("error al leer archivo .env existente: %v", err)
+		}
+
+		// Parsear variables existentes
+		lines := strings.Split(string(data), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) == 2 {
+				key := strings.TrimSpace(parts[0])
+				value := strings.TrimSpace(parts[1])
+
+				// Eliminar comillas alrededor del valor si existen
+				if (strings.HasPrefix(value, "\"") && strings.HasSuffix(value, "\"")) ||
+					(strings.HasPrefix(value, "'") && strings.HasSuffix(value, "'")) {
+					value = value[1 : len(value)-1]
+				}
+
+				envVars[key] = value
+			}
+		}
 	}
 
-	// Si es necesario, añadir o actualizar variables estándar
-	if info.Framework == FrameworkNestJS || info.Framework == FrameworkExpress {
-		// Para APIs, asegurar que tenemos NODE_ENV y PORT
-		if _, ok := envVars["NODE_ENV"]; !ok {
-			envVars["NODE_ENV"] = "production"
+	// Verificar si hay un archivo .env.example
+	var exampleVars map[string]string
+	if _, err := os.Stat(examplePath); err == nil {
+		// El archivo .env.example existe, leerlo
+		data, err := os.ReadFile(examplePath)
+		if err != nil {
+			return fmt.Errorf("error al leer archivo .env.example: %v", err)
 		}
-		if _, ok := envVars["PORT"]; !ok {
-			envVars["PORT"] = fmt.Sprintf("%d", info.DefaultPort)
+
+		// Parsear variables de ejemplo
+		exampleVars = make(map[string]string)
+		lines := strings.Split(string(data), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) == 2 {
+				key := strings.TrimSpace(parts[0])
+				value := strings.TrimSpace(parts[1])
+
+				// Eliminar comillas alrededor del valor si existen
+				if (strings.HasPrefix(value, "\"") && strings.HasSuffix(value, "\"")) ||
+					(strings.HasPrefix(value, "'") && strings.HasSuffix(value, "'")) {
+					value = value[1 : len(value)-1]
+				}
+
+				// Solo agregar a exampleVars si la clave no está ya en envVars
+				if _, exists := envVars[key]; !exists {
+					exampleVars[key] = value
+				}
+			}
+		}
+
+		// Llenar projectInfo.EnvVars con las variables de ejemplo
+		for key, value := range exampleVars {
+			projectInfo.EnvVars[key] = value
 		}
 	}
 
-	// Construir contenido del archivo .env
-	var envContent strings.Builder
-	for k, v := range envVars {
-		// Añadir comillas si el valor contiene espacios o caracteres especiales
-		if strings.ContainsAny(v, " #'\"\n\t") {
-			v = fmt.Sprintf("\"%s\"", v)
-		}
-		envContent.WriteString(fmt.Sprintf("%s=%s\n", k, v))
+	// Agregar valores proporcionados por el usuario
+	for key, value := range userValues {
+		envVars[key] = value
 	}
 
-	// Escribir archivo .env
-	envPath := filepath.Join(projectDir, ".env")
-	if err := os.WriteFile(envPath, []byte(envContent.String()), 0644); err != nil {
+	// Ahora tenemos todas las variables, incluidas las existentes y las nuevas
+	// Generar contenido del archivo .env
+	var content strings.Builder
+
+	// Agregar encabezado
+	content.WriteString("# Archivo generado por SiteManager\n\n")
+
+	// Priorizar las variables relacionadas con la base de datos
+	dbKeys := []string{
+		"DATABASE_URL",
+		"DB_CONNECTION",
+		"DB_HOST",
+		"DB_PORT",
+		"DB_DATABASE",
+		"DB_USERNAME",
+		"DB_PASSWORD",
+	}
+
+	// Agregar primero las variables de base de datos
+	content.WriteString("# Configuración de base de datos\n")
+	for _, key := range dbKeys {
+		if value, exists := envVars[key]; exists {
+			// Verificar si el valor necesita comillas
+			if strings.Contains(value, " ") || strings.Contains(value, "#") {
+				content.WriteString(fmt.Sprintf("%s=\"%s\"\n", key, value))
+			} else {
+				content.WriteString(fmt.Sprintf("%s=%s\n", key, value))
+			}
+			// Eliminar la clave del mapa para no repetirla después
+			delete(envVars, key)
+		}
+	}
+	content.WriteString("\n")
+
+	// Agregar variables de NextJS si existen
+	nextjsKeys := []string{
+		"NEXT_PUBLIC_API_URL",
+		"NEXT_PUBLIC_IMAGE_DOMAINS",
+		"NEXT_PUBLIC_IMAGES_URL",
+		"NEXT_PUBLIC_PWA_ENABLED",
+		"NEXT_PUBLIC_BODY_SIZE_LIMIT",
+	}
+
+	hasNextJSVars := false
+	for _, key := range nextjsKeys {
+		if _, exists := envVars[key]; exists {
+			if !hasNextJSVars {
+				content.WriteString("# Configuración de NextJS\n")
+				hasNextJSVars = true
+			}
+			value := envVars[key]
+			if strings.Contains(value, " ") || strings.Contains(value, "#") {
+				content.WriteString(fmt.Sprintf("%s=\"%s\"\n", key, value))
+			} else {
+				content.WriteString(fmt.Sprintf("%s=%s\n", key, value))
+			}
+			delete(envVars, key)
+		}
+	}
+	if hasNextJSVars {
+		content.WriteString("\n")
+	}
+
+	// Luego agregar el resto de variables
+	content.WriteString("# Otras configuraciones\n")
+
+	// Ordenar claves para una salida predecible
+	keys := make([]string, 0, len(envVars))
+	for key := range envVars {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		value := envVars[key]
+		// Verificar si el valor necesita comillas
+		if strings.Contains(value, " ") || strings.Contains(value, "#") {
+			content.WriteString(fmt.Sprintf("%s=\"%s\"\n", key, value))
+		} else {
+			content.WriteString(fmt.Sprintf("%s=%s\n", key, value))
+		}
+	}
+
+	// Escribir el archivo .env
+	if err := os.WriteFile(envPath, []byte(content.String()), 0644); err != nil {
 		return fmt.Errorf("error al escribir archivo .env: %v", err)
 	}
 
@@ -316,14 +484,14 @@ func ConfigureNodeJSEnv(projectDir string, info *NodeJSProjectInfo, userEnvVars 
 func GetNodeJSStartCommand(info *NodeJSProjectInfo) string {
 	// Si hay un comando start explícito, usarlo
 	if info.StartCommand != "" {
-		return fmt.Sprintf("npm run start")
+		return "npm run start"
 	}
 
 	// Si no hay comando start, usar el framework para determinar el comando
 	switch info.Framework {
 	case FrameworkNestJS:
 		if info.HasTypeScript {
-			return "node dist/main.js"
+			return "node dist/src/main.js"
 		}
 		return "node src/main.js"
 	case FrameworkNextJS:
@@ -359,7 +527,7 @@ func GetNodeJSBuildCommand(info *NodeJSProjectInfo) string {
 		}
 		return ""
 	case FrameworkNextJS:
-		return "next build"
+		return "npm run build"
 	case FrameworkReactJS:
 		return "react-scripts build"
 	default:
