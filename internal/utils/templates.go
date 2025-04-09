@@ -43,7 +43,7 @@ func GetTemplateDirs() []string {
 	return []string{
 		"./templates",
 		homeDir + "/.config/sitemanager/templates",
-		"/etc/sitemanager/templates",
+		"/etc/nginx/sitemanager/templates",
 		"/usr/local/share/sitemanager/templates",
 		"/usr/share/sitemanager/templates",
 	}

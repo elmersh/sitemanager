@@ -156,6 +156,12 @@ func createUserAndDirs(opts *SiteOptions) error {
 		return fmt.Errorf("error al crear directorio public_html: %v", err)
 	}
 
+	// Crear directorio de logs
+	logsDir := filepath.Join(opts.HomeDir, "logs")
+	if err := os.MkdirAll(logsDir, 0755); err != nil {
+		return fmt.Errorf("error al crear directorio logs: %v", err)
+	}
+
 	// Crear index.html de prueba
 	indexFile := filepath.Join(publicDir, "index.html")
 	indexContent := fmt.Sprintf("<html><body><h1>Bienvenido a %s</h1><p>Sitio configurado con SiteManager</p></body></html>", opts.Domain)
@@ -163,8 +169,27 @@ func createUserAndDirs(opts *SiteOptions) error {
 		return fmt.Errorf("error al crear archivo index.html: %v", err)
 	}
 
-	// Cambiar propietario de los directorios
-	cmd := exec.Command("chown", "-R", fmt.Sprintf("%s:%s", opts.User, opts.User), opts.HomeDir)
+	// Configurar permisos y grupos
+	// 1. Agregar usuario www-data al grupo del usuario del sitio
+	cmd := exec.Command("usermod", "-a", "-G", opts.User, "www-data")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("error al agregar www-data al grupo: %v\n%s", err, output)
+	}
+
+	// 2. Establecer permisos del directorio home
+	cmd = exec.Command("chmod", "750", opts.HomeDir)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("error al configurar permisos del directorio home: %v\n%s", err, output)
+	}
+
+	// 3. Establecer permisos recursivos para el grupo
+	cmd = exec.Command("chmod", "-R", "g+rX", opts.HomeDir)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("error al configurar permisos recursivos: %v\n%s", err, output)
+	}
+
+	// 4. Cambiar propietario de los directorios
+	cmd = exec.Command("chown", "-R", fmt.Sprintf("%s:%s", opts.User, opts.User), opts.HomeDir)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("error al cambiar propietario: %v\n%s", err, output)
 	}
@@ -192,7 +217,14 @@ func generateNginxConfig(opts *SiteOptions, cfg *config.Config) error {
 		return fmt.Errorf("no se encontró una plantilla para el tipo de sitio: %s", opts.Type)
 	}
 
-	fmt.Printf("Usando plantilla: %s\n", tmplPath)
+	// Intentar usar la plantilla del sistema primero
+	systemTmplPath := filepath.Join("/etc/nginx/templates", tmplPath)
+	if _, err := os.Stat(systemTmplPath); err == nil {
+		tmplPath = systemTmplPath
+		fmt.Printf("Usando plantilla del sistema: %s\n", tmplPath)
+	} else {
+		fmt.Printf("Usando plantilla interna: %s\n", tmplPath)
+	}
 
 	tmplContent, err := utils.ReadTemplateFile(tmplPath)
 	if err != nil {
@@ -209,7 +241,7 @@ func generateNginxConfig(opts *SiteOptions, cfg *config.Config) error {
 	data := map[string]interface{}{
 		"Domain":   opts.Domain,
 		"RootDir":  filepath.Join(opts.HomeDir, "public_html"),
-		"PHP":      opts.PHP,
+		"PHP":      strings.TrimPrefix(opts.PHP, "php"), // Asegurar que no tenga el prefijo "php"
 		"Port":     opts.Port,
 		"User":     opts.User,
 		"HomeDir":  opts.HomeDir,
