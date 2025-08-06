@@ -11,6 +11,10 @@ on:
         required: true
         type: string
 
+permissions:
+  contents: write
+  packages: write
+
 env:
   GO_VERSION: '1.23'
 
@@ -303,8 +307,20 @@ jobs:
         find artifacts -name "*.tar.gz" -exec cp {} release/ \;
         ls -la release/
 
+    - name: Debug - Verify files and permissions
+      run: |
+        echo "Current directory:"
+        pwd
+        echo "Files in release directory:"
+        ls -la release/
+        echo "GitHub token permissions check:"
+        echo "Repository: ${{ github.repository }}"
+        echo "Event: ${{ github.event_name }}"
+        echo "Ref: ${{ github.ref }}"
+        echo "Tag: ${{ steps.version.outputs.tag }}"
+
     - name: Create Release
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ steps.version.outputs.tag }}
         name: SiteManager ${{ steps.version.outputs.tag }}
@@ -313,5 +329,7 @@ jobs:
         draft: false
         prerelease: false
         generate_release_notes: true
+        fail_on_unmatched_files: true
+        make_latest: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
