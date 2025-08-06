@@ -1,6 +1,4 @@
 # Go build artifacts
-sm
-sitemanager
 *.exe
 *.exe~
 *.dll
