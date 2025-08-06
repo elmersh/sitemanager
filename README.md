@@ -1,193 +1,198 @@
 # SiteManager
 
-SiteManager (sm) es una herramienta para gestionar rápidamente sitios web en un servidor VPS, incluyendo configuraciones de Nginx, usuarios y despliegue de aplicaciones como Laravel y Node.js.
+<div align="center">
 
-## Características
+[![GitHub release](https://img.shields.io/github/v/release/elmersh/sitemanager?style=flat-square)](https://github.com/elmersh/sitemanager/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](https://opensource.org/licenses/MIT)
+[![Go Version](https://img.shields.io/badge/Go-1.23+-00ADD8.svg?style=flat-square)](https://golang.org/)
+[![Platform](https://img.shields.io/badge/platform-Linux-blue.svg?style=flat-square)](https://github.com/elmersh/sitemanager)
 
-- Configuración rápida de sitios web
-- Creación automática de usuarios y directorios
-- Generación de configuraciones de Nginx
-- Configuración automática de SSL con Certbot
-- Despliegue de aplicaciones Laravel, Node.js y sitios estáticos
-- Detección automática de frameworks Node.js
-- Gestión de variables de entorno
-- Integración con bases de datos
-- Estructura modular para fácil extensión
+**Herramienta CLI para gestionar sitios web en servidores VPS de forma rápida y sencilla**
 
-## Instalación
+[Instalación](#-instalación) • [Uso](#-uso) • [Documentación](#-documentación) • [Contribuir](#-contribuir)
 
-### Dependencias
+</div>
 
-- Go 1.16 o superior
-- Nginx
-- PHP-FPM (para sitios Laravel)
-- Node.js y PM2 (para sitios Node.js)
-- Certbot (para SSL)
-- PostgreSQL/MySQL (opcional, para bases de datos)
+---
 
-### Compilación e instalación
+SiteManager (`sm`) es una herramienta de línea de comandos que automatiza la configuración y gestión de sitios web en servidores VPS Ubuntu/Debian. Simplifica tareas complejas como la configuración de Nginx, SSL, usuarios del sistema y despliegue de aplicaciones.
+
+## ✨ Características
+
+- 🚀 **Instalación rápida**: Un comando para instalar desde internet
+- 🔧 **Configuración automática**: Nginx, usuarios y directorios
+- 🔒 **SSL automático**: Integración completa con Let's Encrypt/Certbot
+- 📦 **Multi-framework**: Laravel, Node.js, sitios estáticos
+- 🔄 **Auto-actualización**: `sm self-update` para mantener la última versión
+- 🌐 **Subdominios**: Detección y configuración automática
+- 📊 **Gestión de dependencias**: Verificación inteligente sin instalación forzada
+- 🎯 **Fácil de usar**: Sintaxis simple e intuitiva
+
+## 🚀 Instalación
+
+### Instalación rápida (recomendada)
 
 ```bash
-# Clonar el repositorio
-git clone https://github.com/yourusername/sitemanager.git
-cd sitemanager
-
-# Compilar e instalar
-make install
+curl -fsSL https://raw.githubusercontent.com/elmersh/sitemanager/main/install.sh | sudo bash
 ```
 
-## Uso
+### Instalación manual
 
-### Configuración
+```bash
+# Descargar la última versión
+wget https://github.com/elmersh/sitemanager/releases/latest/download/sitemanager-1.0.0-linux-amd64.tar.gz
 
-SiteManager busca un archivo de configuración en `~/.config/sitemanager.yaml`. Si no existe, creará uno con valores predeterminados.
-
-Ejemplo de configuración:
-
-```yaml
-nginxPath: /etc/nginx
-sitesAvailable: /etc/nginx/sites-available
-sitesEnabled: /etc/nginx/sites-enabled
-defaultUser: www-data
-defaultGroup: www-data
-phpVersions:
-  - 7.4
-  - 8.0
-  - 8.1
-  - 8.2
-  - 8.3
-  - 8.4
-defaultTemplate: laravel
-templates:
-  laravel: nginx/laravel.conf.tmpl
-  nodejs: nginx/nodejs.conf.tmpl
-subdomainTemplates:
-  laravel: nginx/subdomain_laravel.conf.tmpl
-  nodejs: nginx/subdomain_nodejs.conf.tmpl
+# Extraer e instalar
+tar -xzf sitemanager-1.0.0-linux-amd64.tar.gz
+cd sitemanager-1.0.0/
+sudo ./install.sh
 ```
 
-## Comandos disponibles
+### Auto-actualización
 
-### Verificar estado del sistema
+```bash
+# Verificar actualizaciones
+sm version check
 
-Comprueba que todas las dependencias necesarias están correctamente instaladas y funcionando:
+# Actualizar automáticamente
+sudo sm self-update
+```
 
+## 📋 Dependencias
+
+SiteManager **no instala automáticamente** las dependencias del sistema. Te informa qué falta y cómo instalarlo:
+
+### Obligatorias para todos
+- **Nginx** - servidor web principal
+
+### Opcionales según tipo de sitio
+- **PHP-FPM** - para sitios Laravel/PHP
+- **Node.js + PM2** - para aplicaciones Node.js
+- **Certbot** - para certificados SSL automáticos
+- **Composer** - para proyectos Laravel
+
+## ⚙️ Configuración inicial
+
+### 1. Verificar el sistema
 ```bash
 sudo sm status
 ```
 
-Este comando verificará la disponibilidad de:
-- Nginx
-- PHP
-- Node.js
-- PM2
-- Certbot
-- Composer
-
-### Crear un nuevo sitio web
-
+### 2. Configurar email para SSL (obligatorio)
 ```bash
-sudo sm site -d ejemplo.com -t laravel -p 8.4
+# Editar configuración
+nano ~/.config/sitemanager/config.yaml
+
+# Establecer tu email y aceptar términos
+email: tu@email.com
+agree_tos: true
 ```
 
-Opciones:
-- `-d, --domain`: Dominio del sitio (obligatorio)
-- `-t, --type`: Tipo de sitio (laravel, nodejs, static)
-- `-p, --php`: Versión de PHP (para sitios Laravel)
-- `-P, --port`: Puerto para aplicaciones Node.js (default: 3000)
+La configuración se crea automáticamente con valores por defecto en `~/.config/sitemanager/config.yaml`:
 
-**Ejemplos de uso:**
+```yaml
+# Configuración básica
+email: ""                    # Tu email (requerido para SSL)
+default_php: "8.3"          # Versión PHP por defecto
+default_port: 3000          # Puerto base para Node.js
 
-Para un sitio Laravel:
-```bash
-sudo sm site -d miapp.com -t laravel -p 8.2
+# SSL/Certificados
+agree_tos: false            # Debe ser true para SSL
+use_staging: false          # false = certificados reales
+backup_configs: true        # Backup automático de configs
+
+# Funciones avanzadas
+auto_update: false          # Auto-actualización (recomendado: false)
+check_updates: true         # Verificar actualizaciones
 ```
 
-Para un sitio Node.js:
+## 💻 Uso básico
+
+### 1. Crear un sitio web
 ```bash
+# Sitio Laravel
+sudo sm site -d miapp.com -t laravel
+
+# Sitio Node.js
 sudo sm site -d miapi.com -t nodejs -P 3001
-```
 
-Para un sitio estático (HTML/CSS/JS):
-```bash
-sudo sm site -d mipagina.com -t static
-```
+# Sitio estático
+sudo sm site -d miweb.com -t static
 
-Para un subdominio:
-```bash
+# Subdominio
 sudo sm site -d admin.miapp.com -t laravel
 ```
 
-**Notas:**
-- El comando crea un usuario en el sistema con el nombre del dominio
-- Configura Nginx con las plantillas adecuadas
-- Para sitios estáticos, crea una estructura completa con HTML, CSS y JavaScript de ejemplo
-- Para subdominios, utiliza el usuario del dominio principal
-
-### Configurar SSL con Certbot
-
+### 2. Configurar SSL
 ```bash
-sudo sm secure -d ejemplo.com -e tu@email.com
-```
+# Usando email de configuración
+sudo sm secure -d miapp.com
 
-Opciones:
-- `-d, --domain`: Dominio del sitio (obligatorio)
-- `-e, --email`: Email para Let's Encrypt (obligatorio)
-
-**Ejemplos de uso:**
-
-Configurar SSL para un dominio principal:
-```bash
+# Especificando email
 sudo sm secure -d miapp.com -e admin@miapp.com
 ```
 
-Configurar SSL para un subdominio:
+### 3. Desplegar aplicación
 ```bash
-sudo sm secure -d api.miapp.com -e admin@miapp.com
+# Repositorio público
+sudo sm deploy -d miapp.com -r https://github.com/usuario/mi-app.git
+
+# Repositorio privado (SSH)
+sudo sm deploy -d miapp.com -r git@github.com:usuario/mi-app.git -s
 ```
 
-**Notas:**
-- El comando utiliza Certbot para obtener certificados SSL
-- Actualiza la configuración de Nginx para usar HTTPS
-- Configura la redirección de HTTP a HTTPS
+### 4. Gestionar variables de entorno
+```bash
+# Modo interactivo (recomendado)
+sudo sm env -d miapp.com -i
+
+# Variables específicas
+sudo sm env -d miapp.com -e DATABASE_URL=postgresql://... -e JWT_SECRET=abc123
+```
+
+## 🔧 Comandos disponibles
+
+| Comando | Descripción | Ejemplo |
+|---------|-------------|---------|
+| `sm status` | Verificar estado del sistema | `sudo sm status` |
+| `sm site` | Crear/configurar sitio web | `sudo sm site -d miapp.com -t laravel` |
+| `sm secure` | Configurar SSL/HTTPS | `sudo sm secure -d miapp.com` |
+| `sm deploy` | Desplegar aplicación | `sudo sm deploy -d miapp.com -r repo.git` |
+| `sm env` | Gestionar variables de entorno | `sudo sm env -d miapp.com -i` |
+| `sm self-update` | Actualizar SiteManager | `sudo sm self-update` |
+| `sm version` | Ver información de versión | `sm version` |
+| `sm version check` | Verificar actualizaciones | `sm version check` |
 
 ### Desplegar una aplicación
 
 ```bash
-sudo sm deploy -d ejemplo.com -r https://github.com/usuario/repo.git -t laravel
+sudo sm deploy -d ejemplo.com -r https://github.com/usuario/repo.git
 ```
 
-Opciones:
+Opciones disponibles:
 - `-d, --domain`: Dominio del sitio (obligatorio)
-- `-r, --repo`: Repositorio Git (obligatorio)
-- `-b, --branch`: Rama del repositorio (por defecto: main)
-- `-t, --type`: Tipo de aplicación (laravel, nodejs)
-- `-e, --env`: Entorno (development, production)
-- `-s, --ssh`: Usar SSH para clonar el repositorio
+- `-r, --repo`: URL del repositorio Git (obligatorio)
+- `-b, --branch`: Rama a desplegar (por defecto: main)
+- `-t, --type`: Tipo de aplicación (laravel, nodejs, static)
+- `-e, --env`: Entorno de despliegue (development, production)
+- `-s, --ssh`: Usar SSH para repositorios privados
 
-**Ejemplos de uso:**
+**Ejemplos:**
 
-Desplegar una aplicación Laravel usando HTTPS:
+Aplicación Laravel (repositorio público):
 ```bash
 sudo sm deploy -d miapp.com -r https://github.com/usuario/miapp.git -t laravel
 ```
 
-Desplegar una aplicación Node.js usando SSH (recomendado para repos privados):
+Aplicación Node.js (repositorio privado):
 ```bash
 sudo sm deploy -d miapi.com -r git@github.com:usuario/miapi.git -t nodejs -s
 ```
 
-Desplegar en un subdominio con una rama específica:
+Despliegue en subdominio con rama específica:
 ```bash
-sudo sm deploy -d admin.miapp.com -r https://github.com/usuario/admin-panel.git -t laravel -b develop
+sudo sm deploy -d admin.miapp.com -r https://github.com/usuario/admin-panel.git -b develop
 ```
-
-**Notas:**
-- Para repositorios privados, use la opción `-s` para configurar claves SSH
-- El comando detecta automáticamente el tipo de framework (NestJS, NextJS, Express, etc.)
-- Para Laravel, ejecuta automáticamente composer install, migraciones, etc.
-- Para Node.js, instala dependencias, ejecuta build y configura PM2
-- Para sitios estáticos, simplemente copia los archivos al directorio public_html
 
 ### Configurar variables de entorno
 
@@ -195,13 +200,13 @@ sudo sm deploy -d admin.miapp.com -r https://github.com/usuario/admin-panel.git 
 sudo sm env -d ejemplo.com [opciones]
 ```
 
-Opciones:
+Opciones disponibles:
 - `-d, --domain`: Dominio del sitio (obligatorio)
-- `-e, --env`: Variables de entorno en formato KEY=VALUE
+- `-e, --env`: Variables de entorno (formato KEY=VALUE)
 - `-i, --interactive`: Modo interactivo para configurar variables
-- `-f, --file`: Archivo .env a importar
+- `-f, --file`: Importar desde archivo .env existente
 
-**Ejemplos de uso:**
+**Ejemplos:**
 
 Configuración interactiva (recomendada):
 ```bash
@@ -210,19 +215,13 @@ sudo sm env -d miapi.com -i
 
 Establecer variables específicas:
 ```bash
-sudo sm env -d miapi.com -e DATABASE_URL=postgresql://user:pass@localhost:5432/midb -e JWT_SECRET=secretkey
+sudo sm env -d miapi.com -e DATABASE_URL=postgresql://user:pass@localhost/db -e JWT_SECRET=secretkey
 ```
 
-Importar desde un archivo existente:
+Importar desde archivo:
 ```bash
-sudo sm env -d miapi.com -f /path/to/.env.production
+sudo sm env -d miapi.com -f /ruta/al/.env.production
 ```
-
-**Notas:**
-- El modo interactivo detecta variables de `.env.example` si existe
-- Las contraseñas y secretos se ingresan con entrada oculta
-- Genera automáticamente valores seguros para tokens y secretos
-- Configura correctamente el propietario del archivo .env
 
 ## Sitios Estáticos
 
@@ -359,76 +358,54 @@ SiteManager configura automáticamente registros de logs:
    sudo sm env -d miapp.com -i
    ```
 
-## Estructura del proyecto
+## 🛠️ Desarrollo
+
+### Compilar desde el código fuente
+
+```bash
+# Clonar el repositorio
+git clone https://github.com/elmersh/sitemanager.git
+cd sitemanager
+
+# Compilar
+make build
+
+# Instalar localmente (opcional)
+sudo make install
+```
+
+### Estructura del proyecto
 
 ```
 sitemanager/
-├── cmd/
-│   └── sm/
-│       └── main.go
+├── cmd/sm/              # Punto de entrada
 ├── internal/
-│   ├── config/
-│   │   └── config.go
-│   ├── commands/
-│   │   ├── commands.go
-│   │   ├── site.go
-│   │   ├── secure.go
-│   │   ├── deploy.go
-│   │   └── env.go
-│   ├── templates/
-│   │   ├── nginx/
-│   │   │   ├── laravel.conf.tmpl
-│   │   │   ├── nodejs.conf.tmpl
-│   │   │   ├── subdomain_laravel.conf.tmpl
-│   │   │   └── subdomain_nodejs.conf.tmpl
-│   │   └── ssl/
-│   │       └── ssl.conf.tmpl
-│   └── utils/
-│       ├── utils.go
-│       ├── database.go
-│       └── nodejs.go
-├── go.mod
-└── go.sum
+│   ├── commands/        # Implementación de comandos CLI
+│   ├── config/          # Gestión de configuración
+│   ├── templates/       # Templates de archivos
+│   └── utils/           # Utilidades compartidas
+├── scripts/            # Scripts de construcción
+└── docs/              # Documentación adicional
 ```
 
-## Solución de problemas
+## 🤝 Contribuir
 
-### Permisos incorrectos
+¡Las contribuciones son bienvenidas! Por favor:
 
-Si encuentras problemas de permisos al desplegar aplicaciones:
-
-```bash
-# Verificar y corregir propietario de directorios
-sudo chown -R usuario:usuario /home/dominio.com
-
-# Verificar permisos de directorio .ssh
-sudo chmod 700 /home/dominio.com/.ssh
-sudo chmod 600 /home/dominio.com/.ssh/*
-```
-
-### Problemas con PM2
-
-Si una aplicación Node.js no inicia correctamente:
-
-```bash
-# Ver logs de la aplicación
-pm2 logs dominio.com
-
-# Reiniciar la aplicación
-pm2 restart dominio.com
-
-# Configurar manualmente el archivo de entorno
-sudo sm env -d dominio.com -i
-```
-
-## Contribuir
-
-1. Haz un fork del proyecto
-2. Crea una rama para tu característica (`git checkout -b feature/amazing-feature`)
-3. Haz commit de tus cambios (`git commit -m 'Add some amazing feature'`)
-4. Haz push a la rama (`git push origin feature/amazing-feature`)
+1. Haz fork del repositorio
+2. Crea una rama para tu funcionalidad (`git checkout -b feature/nueva-funcionalidad`)
+3. Haz commit de tus cambios (`git commit -m 'Añadir nueva funcionalidad'`)
+4. Push a la rama (`git push origin feature/nueva-funcionalidad`)
 5. Abre un Pull Request
 
-## Licencia
+Consulta [CONTRIBUTING.md](CONTRIBUTING.md) para más detalles.
 
-Este proyecto está licenciado bajo la Licencia MIT - ver el archivo [LICENSE](LICENSE) para más detalles.
+## 📜 Licencia
+
+Este proyecto está bajo la Licencia MIT. Ver el archivo [LICENSE](LICENSE) para más detalles.
+
+## ⭐ Soporte
+
+Si encuentras útil este proyecto, considera darle una estrella ⭐ en GitHub.
+
+Para reportar bugs o solicitar funcionalidades, abre un [issue](https://github.com/elmersh/sitemanager/issues).

@@ -39,6 +39,11 @@ func AddSiteCommand(rootCmd *cobra.Command, cfg *config.Config) {
 		Short: "Configurar un nuevo sitio web",
 		Long:  `Configura un nuevo sitio web creando un usuario, directorios y configuración de Nginx.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Verificar requisitos básicos del sistema
+			if err := utils.CheckBasicSystemRequirements(); err != nil {
+				return err
+			}
+
 			// Configurar opciones
 			if opts.Domain == "" {
 				return fmt.Errorf("el dominio es obligatorio")
@@ -48,10 +53,31 @@ func AddSiteCommand(rootCmd *cobra.Command, cfg *config.Config) {
 			if opts.Type == "" {
 				opts.Type = cfg.DefaultTemplate
 			}
+			
+			if opts.PHP == "" {
+				opts.PHP = cfg.DefaultPHP
+			}
 
 			// Verificar que el tipo de sitio es válido
 			if _, ok := cfg.Templates[opts.Type]; !ok {
 				return fmt.Errorf("tipo de sitio no válido: %s", opts.Type)
+			}
+
+			// Verificar dependencias específicas del tipo de sitio
+			depErrors := utils.CheckSiteTypeDependencies(opts.Type, opts.PHP)
+			if len(depErrors) > 0 {
+				// Mostrar errores pero permitir continuar si el usuario confirma
+				fmt.Print(utils.FormatDependencyErrors(depErrors))
+				
+				fmt.Print("¿Deseas continuar sin estas dependencias? Las necesitarás para que el sitio funcione correctamente [y/N]: ")
+				var response string
+				fmt.Scanln(&response)
+				
+				if strings.ToLower(response) != "y" && strings.ToLower(response) != "yes" {
+					return fmt.Errorf("instalación cancelada - instala las dependencias y vuelve a intentar")
+				}
+				
+				fmt.Println("⚠️  Continuando sin algunas dependencias. El sitio puede no funcionar correctamente.")
 			}
 
 			// Determinar si es un subdominio

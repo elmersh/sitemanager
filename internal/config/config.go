@@ -12,16 +12,47 @@ import (
 
 // Config representa la configuración del sitemanager
 type Config struct {
-	NginxPath          string            `yaml:"nginxPath"`
-	SitesAvailable     string            `yaml:"sitesAvailable"`
-	SitesEnabled       string            `yaml:"sitesEnabled"`
-	DefaultUser        string            `yaml:"defaultUser"`
-	DefaultGroup       string            `yaml:"defaultGroup"`
-	PHPVersions        []string          `yaml:"phpVersions"`
-	DefaultTemplate    string            `yaml:"defaultTemplate"`
+	// Configuración de sistema
+	NginxPath          string            `yaml:"nginx_path"`
+	SitesAvailable     string            `yaml:"sites_available"`
+	SitesEnabled       string            `yaml:"sites_enabled"`
+	DefaultUser        string            `yaml:"default_user"`
+	DefaultGroup       string            `yaml:"default_group"`
+	SkelDir            string            `yaml:"skel_dir"`
+	
+	// Configuración de usuario
+	Email              string            `yaml:"email"`
+	DefaultPHP         string            `yaml:"default_php"`
+	DefaultPort        int               `yaml:"default_port"`
+	
+	// SSL/Certificados
+	AgreeTOS           bool              `yaml:"agree_tos"`
+	ForceRenewal       bool              `yaml:"force_renewal"`
+	UseStaging         bool              `yaml:"use_staging"`
+	UseWWW             bool              `yaml:"use_www"`
+	
+	// Backup y mantenimiento
+	BackupConfigs      bool              `yaml:"backup_configs"`
+	AutoUpdate         bool              `yaml:"auto_update"`
+	CheckUpdates       bool              `yaml:"check_updates"`
+	
+	// Versiones y templates
+	PHPVersions        []string          `yaml:"php_versions"`
+	NodeVersions       []string          `yaml:"node_versions"`
+	DefaultTemplate    string            `yaml:"default_template"`
 	Templates          map[string]string `yaml:"templates"`
-	SubdomainTemplates map[string]string `yaml:"subdomainTemplates"`
-	SkelDir            string            `yaml:"skelDir"`
+	SubdomainTemplates map[string]string `yaml:"subdomain_templates"`
+	
+	// Configuraciones avanzadas
+	MaxSites           int               `yaml:"max_sites"`
+	PortRange          PortRange         `yaml:"port_range"`
+	DatabaseEngines    []string          `yaml:"database_engines"`
+}
+
+// PortRange define el rango de puertos disponibles para aplicaciones Node.js
+type PortRange struct {
+	Start int `yaml:"start"`
+	End   int `yaml:"end"`
 }
 
 // LoadConfig carga la configuración desde el archivo de configuración
@@ -33,7 +64,7 @@ func LoadConfig() (*Config, error) {
 	}
 
 	// Buscar en la ruta de configuración
-	configPath := filepath.Join(currentUser.HomeDir, ".config", "sitemanager.yaml")
+	configPath := filepath.Join(currentUser.HomeDir, ".config", "sitemanager", "config.yaml")
 
 	// Verificar si el archivo existe
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
@@ -64,13 +95,36 @@ func LoadConfig() (*Config, error) {
 // createDefaultConfig crea un archivo de configuración por defecto
 func createDefaultConfig(path string) (*Config, error) {
 	cfg := Config{
+		// Configuración de sistema
 		NginxPath:       "/etc/nginx",
 		SitesAvailable:  "/etc/nginx/sites-available",
 		SitesEnabled:    "/etc/nginx/sites-enabled",
 		DefaultUser:     "www-data",
 		DefaultGroup:    "www-data",
-		PHPVersions:     []string{"7.4", "8.0", "8.1", "8.2", "8.3", "8.4"},
+		SkelDir:         "/etc/sitemanager/skel",
+		
+		// Configuración de usuario (valores vacíos para que el usuario los configure)
+		Email:           "", // Se debe configurar antes de usar SSL
+		DefaultPHP:      "8.3", // PHP 8.3 por defecto como solicitaste
+		DefaultPort:     3000,
+		
+		// SSL/Certificados
+		AgreeTOS:        false, // Debe ser configurado por el usuario
+		ForceRenewal:    false,
+		UseStaging:      false, // Usar producción por defecto
+		UseWWW:          true,
+		
+		// Backup y mantenimiento
+		BackupConfigs:   true,
+		AutoUpdate:      false, // Disabled por defecto para seguridad
+		CheckUpdates:    true,  // Verificar actualizaciones por defecto
+		
+		// Versiones soportadas
+		PHPVersions:     []string{"8.0", "8.1", "8.2", "8.3", "8.4"},
+		NodeVersions:    []string{"16", "18", "20", "22"},
 		DefaultTemplate: "laravel",
+		
+		// Templates
 		Templates: map[string]string{
 			"laravel": "nginx/laravel.conf.tmpl",
 			"nodejs":  "nginx/nodejs.conf.tmpl",
@@ -81,7 +135,14 @@ func createDefaultConfig(path string) (*Config, error) {
 			"nodejs":  "nginx/subdomain_nodejs.conf.tmpl",
 			"static":  "nginx/subdomain_static.conf.tmpl",
 		},
-		SkelDir: "/etc/sitemanager/skel",
+		
+		// Configuraciones avanzadas
+		MaxSites:        100, // Límite de sitios por servidor
+		PortRange: PortRange{
+			Start: 3000,
+			End:   3999,
+		},
+		DatabaseEngines: []string{"postgresql", "mysql", "mongodb"},
 	}
 
 	// Crear el directorio .config si no existe
@@ -101,5 +162,72 @@ func createDefaultConfig(path string) (*Config, error) {
 	}
 
 	fmt.Printf("Se ha creado un archivo de configuración por defecto en %s\n", path)
+	fmt.Printf("\n⚠️  IMPORTANTE: Configura tu email antes de usar SSL:\n")
+	fmt.Printf("   Edita: %s\n", path)
+	fmt.Printf("   Establece: email: tu@email.com\n")
+	fmt.Printf("   Establece: agree_tos: true\n\n")
+	
 	return &cfg, nil
+}
+
+// SaveConfig guarda la configuración actual en el archivo
+func (c *Config) SaveConfig() error {
+	currentUser, err := user.Current()
+	if err != nil {
+		return fmt.Errorf("no se pudo obtener el usuario actual: %v", err)
+	}
+	
+	configPath := filepath.Join(currentUser.HomeDir, ".config", "sitemanager", "config.yaml")
+	
+	// Convertir la configuración a YAML
+	data, err := yaml.Marshal(c)
+	if err != nil {
+		return fmt.Errorf("no se pudo codificar la configuración: %v", err)
+	}
+	
+	// Escribir el archivo de configuración
+	if err := os.WriteFile(configPath, data, 0644); err != nil {
+		return fmt.Errorf("no se pudo escribir el archivo de configuración: %v", err)
+	}
+	
+	return nil
+}
+
+// ValidateSSLConfig verifica que la configuración SSL esté completa
+func (c *Config) ValidateSSLConfig() error {
+	if c.Email == "" {
+		return fmt.Errorf("email no configurado: edita ~/.config/sitemanager/config.yaml y establece tu email")
+	}
+	
+	if !c.AgreeTOS {
+		return fmt.Errorf("términos de servicio no aceptados: establece agree_tos: true en la configuración")
+	}
+	
+	return nil
+}
+
+// GetNextPort obtiene el siguiente puerto disponible en el rango configurado
+func (c *Config) GetNextPort() int {
+	// Implementación simple - en producción se debería verificar qué puertos están en uso
+	return c.DefaultPort
+}
+
+// IsValidPHPVersion verifica si una versión de PHP está soportada
+func (c *Config) IsValidPHPVersion(version string) bool {
+	for _, v := range c.PHPVersions {
+		if v == version {
+			return true
+		}
+	}
+	return false
+}
+
+// GetConfigPath obtiene la ruta del archivo de configuración
+func GetConfigPath() (string, error) {
+	currentUser, err := user.Current()
+	if err != nil {
+		return "", fmt.Errorf("no se pudo obtener el usuario actual: %v", err)
+	}
+	
+	return filepath.Join(currentUser.HomeDir, ".config", "sitemanager", "config.yaml"), nil
 }
