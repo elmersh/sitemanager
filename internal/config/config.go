@@ -84,6 +84,9 @@ func LoadConfig() (*Config, error) {
 		return nil, fmt.Errorf("no se pudo decodificar la configuración: %v", err)
 	}
 
+	// Aplicar valores por defecto para campos críticos faltantes
+	applyDefaults(&cfg)
+
 	// Inicializar el directorio skel si no existe
 	if err := utils.InitSkelDir(cfg.SkelDir); err != nil {
 		return nil, fmt.Errorf("error al inicializar el directorio skel: %v", err)
@@ -230,4 +233,79 @@ func GetConfigPath() (string, error) {
 	}
 	
 	return filepath.Join(currentUser.HomeDir, ".config", "sitemanager", "config.yaml"), nil
+}
+
+// applyDefaults aplica valores por defecto a campos críticos que puedan estar vacíos
+func applyDefaults(cfg *Config) {
+	// Configuración de sistema
+	if cfg.NginxPath == "" {
+		cfg.NginxPath = "/etc/nginx"
+	}
+	if cfg.SitesAvailable == "" {
+		cfg.SitesAvailable = "/etc/nginx/sites-available"
+	}
+	if cfg.SitesEnabled == "" {
+		cfg.SitesEnabled = "/etc/nginx/sites-enabled"
+	}
+	if cfg.DefaultUser == "" {
+		cfg.DefaultUser = "www-data"
+	}
+	if cfg.DefaultGroup == "" {
+		cfg.DefaultGroup = "www-data"
+	}
+	if cfg.SkelDir == "" {
+		cfg.SkelDir = "/etc/sitemanager/skel"
+	}
+	
+	// Configuración de usuario
+	if cfg.DefaultPHP == "" {
+		cfg.DefaultPHP = "8.3"
+	}
+	if cfg.DefaultPort == 0 {
+		cfg.DefaultPort = 3000
+	}
+	
+	// Configuración por defecto de templates si está vacío
+	if cfg.DefaultTemplate == "" {
+		cfg.DefaultTemplate = "laravel"
+	}
+	
+	// Inicializar maps si están nil
+	if cfg.Templates == nil {
+		cfg.Templates = map[string]string{
+			"laravel": "nginx/laravel.conf.tmpl",
+			"nodejs":  "nginx/nodejs.conf.tmpl",
+			"static":  "nginx/static.conf.tmpl",
+		}
+	}
+	
+	if cfg.SubdomainTemplates == nil {
+		cfg.SubdomainTemplates = map[string]string{
+			"laravel": "nginx/subdomain_laravel.conf.tmpl",
+			"nodejs":  "nginx/subdomain_nodejs.conf.tmpl",
+			"static":  "nginx/subdomain_static.conf.tmpl",
+		}
+	}
+	
+	// Versiones soportadas
+	if cfg.PHPVersions == nil || len(cfg.PHPVersions) == 0 {
+		cfg.PHPVersions = []string{"8.0", "8.1", "8.2", "8.3", "8.4"}
+	}
+	if cfg.NodeVersions == nil || len(cfg.NodeVersions) == 0 {
+		cfg.NodeVersions = []string{"16", "18", "20", "22"}
+	}
+	
+	// Configuraciones avanzadas
+	if cfg.MaxSites == 0 {
+		cfg.MaxSites = 100
+	}
+	if cfg.PortRange.Start == 0 {
+		cfg.PortRange.Start = 3000
+	}
+	if cfg.PortRange.End == 0 {
+		cfg.PortRange.End = 3999
+	}
+	if cfg.DatabaseEngines == nil || len(cfg.DatabaseEngines) == 0 {
+		cfg.DatabaseEngines = []string{"postgresql", "mysql", "mongodb"}
+	}
 }
