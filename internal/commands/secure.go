@@ -72,8 +72,20 @@ func AddSecureCommand(rootCmd *cobra.Command, cfg *config.Config) {
 			}
 
 			// Configurar usuario y directorios
-			opts.User = strings.Split(opts.Domain, ".")[0]
-			opts.HomeDir = filepath.Join("/home", opts.Domain)
+			// Determinar si es un subdominio para configurar rutas correctas
+			domainParts := strings.Split(opts.Domain, ".")
+			if len(domainParts) > 2 && domainParts[0] != "www" {
+				// Es un subdominio
+				parentDomain := strings.Join(domainParts[1:], ".")
+				opts.User = strings.Split(parentDomain, ".")[0]
+				// Usar la nueva estructura: /home/dominio.com/subdominios/sub.dominio.com/
+				parentHomeDir := filepath.Join("/home", parentDomain)
+				opts.HomeDir = filepath.Join(parentHomeDir, "subdominios", opts.Domain)
+			} else {
+				// No es subdominio
+				opts.User = domainParts[0]
+				opts.HomeDir = filepath.Join("/home", opts.Domain)
+			}
 
 			// Verificar si el sitio existe
 			if !siteExists(opts.Domain, cfg) {
@@ -155,7 +167,9 @@ func siteExists(domain string, cfg *config.Config) bool {
 			fmt.Printf("El dominio principal %s no existe\n", parentDomain)
 			return false
 		}
-		homeDir = filepath.Join("/home", parentDomain)
+		// Para subdominios, usar la nueva estructura: /home/dominio.com/subdominios/sub.dominio.com/
+		parentHomeDir := filepath.Join("/home", parentDomain)
+		homeDir = filepath.Join(parentHomeDir, "subdominios", domain)
 	} else {
 		homeDir = filepath.Join("/home", domain)
 	}
@@ -187,14 +201,8 @@ func siteExists(domain string, cfg *config.Config) bool {
 		return false
 	}
 
-	// Para subdominios, verificar si existe el directorio apps
-	if len(domainParts) > 2 && domainParts[0] != "www" {
-		appsDir := filepath.Join(homeDir, "apps")
-		if _, err := os.Stat(appsDir); os.IsNotExist(err) {
-			fmt.Printf("El directorio apps %s no existe\n", appsDir)
-			return false
-		}
-	}
+	// Para subdominios, no es necesario verificar el directorio apps
+	// ya que cada subdominio tiene su propia estructura
 
 	return true
 }
