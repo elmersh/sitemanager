@@ -231,6 +231,7 @@ install_sitemanager() {
     mkdir -p "$INSTALL_DIR"
     mkdir -p "$SHARE_DIR/templates/nginx"
     mkdir -p "$SHARE_DIR/templates/ssl"
+    mkdir -p "$CONFIG_DIR"
     mkdir -p "$CONFIG_DIR/skel"
     
     # Instalar binario
