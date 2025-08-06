@@ -1512,7 +1512,7 @@ func setupPostgreSQLDatabase(opts *DeployOptions, projectInfo *utils.NodeJSProje
 	fmt.Printf("Usuario: %s\n", dbUser)
 	fmt.Printf("Contraseña: %s\n", dbPassword)
 	fmt.Printf("URL de conexión: %s\n", databaseURL)
-	fmt.Println("===================================\n")
+	fmt.Println("===================================")
 
 	return envVars, nil
 }
