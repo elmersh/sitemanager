@@ -9,6 +9,10 @@ import (
 
 // InitSkelDir inicializa el directorio skel con la estructura básica necesaria
 func InitSkelDir(skelDir string) error {
+	// Verificar que skelDir no esté vacío
+	if skelDir == "" {
+		return fmt.Errorf("el directorio skel no puede estar vacío")
+	}
 	// Verificar si el directorio skel ya existe
 	if _, err := os.Stat(skelDir); err == nil {
 		fmt.Printf("El directorio skel ya existe: %s\n", skelDir)

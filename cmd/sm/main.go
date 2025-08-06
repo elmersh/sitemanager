@@ -25,13 +25,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Cargar configuración
-	cfg, err := config.LoadConfig()
-	if err != nil {
-		fmt.Printf("Error al cargar la configuración: %v\n", err)
-		os.Exit(1)
-	}
-
 	// Comando raíz
 	rootCmd := &cobra.Command{
 		Use:     "sm",
@@ -45,17 +38,23 @@ despliegue de aplicaciones como Laravel y Node.js.`,
 	// Establecer información de versión en commands
 	commands.SetVersionInfo(Version, BuildTime, GitCommit)
 
-	// Agregar comandos
-	commands.AddSiteCommand(rootCmd, cfg)
-	commands.AddSecureCommand(rootCmd, cfg)
-	commands.AddDeployCommand(rootCmd, cfg)
-	commands.AddSelfUpdateCommand(rootCmd, cfg)
+	// Agregar comandos (cargarán la configuración cuando la necesiten)
+	commands.AddSiteCommand(rootCmd, nil)
+	commands.AddSecureCommand(rootCmd, nil)
+	commands.AddDeployCommand(rootCmd, nil)
+	commands.AddSelfUpdateCommand(rootCmd, nil)
 
 	// Comando para verificar el estado del sistema
 	statusCmd := &cobra.Command{
 		Use:   "status",
 		Short: "Mostrar el estado del sistema",
 		Run: func(cmd *cobra.Command, args []string) {
+			// Cargar configuración
+			_, err := config.LoadConfig()
+			if err != nil {
+				fmt.Printf("Error al cargar la configuración: %v\n", err)
+				os.Exit(1)
+			}
 			// Verificar Nginx
 			fmt.Print("Verificando Nginx... ")
 			if err := utils.CheckNginx(); err != nil {

@@ -35,6 +35,15 @@ func AddEnvCommand(rootCmd *cobra.Command, cfg *config.Config) {
 		Short: "Configurar variables de entorno para un sitio",
 		Long:  `Configura variables de entorno para un sitio, creando o modificando el archivo .env.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Cargar configuración si no se ha pasado
+			if cfg == nil {
+				var err error
+				cfg, err = config.LoadConfig()
+				if err != nil {
+					return fmt.Errorf("error al cargar la configuración: %v", err)
+				}
+			}
+
 			// Configurar opciones
 			if opts.Domain == "" {
 				return fmt.Errorf("el dominio es obligatorio")
