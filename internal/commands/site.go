@@ -98,7 +98,9 @@ func AddSiteCommand(rootCmd *cobra.Command, cfg *config.Config) {
 
 				// Usar el usuario del dominio principal para subdominios
 				opts.User = strings.Split(opts.ParentDomain, ".")[0]
-				opts.HomeDir = filepath.Join("/home", opts.ParentDomain)
+				// Para subdominios, crear estructura dentro de /home/dominio.com/subdominios/sub.dominio.com/
+				parentHomeDir := filepath.Join("/home", opts.ParentDomain)
+				opts.HomeDir = filepath.Join(parentHomeDir, "subdominios", opts.Domain)
 			} else {
 				// No es subdominio, configuración normal
 				opts.User = domainParts[0]
@@ -187,9 +189,50 @@ func createUserAndDirs(opts *SiteOptions) error {
 		}
 	}
 
-	// Si es un subdominio, no necesitamos crear la estructura de directorios
-	// ya que usará la del dominio principal
+	// Si es un subdominio, crear la estructura específica para subdominios
 	if opts.IsSubdomain {
+		// Verificar que el dominio principal existe
+		parentHomeDir := filepath.Join("/home", opts.ParentDomain)
+		if _, err := os.Stat(parentHomeDir); os.IsNotExist(err) {
+			return fmt.Errorf("el dominio principal %s no existe, debe crearlo primero", opts.ParentDomain)
+		}
+
+		// Crear directorio subdominios si no existe
+		subdomainsDir := filepath.Join(parentHomeDir, "subdominios")
+		if err := os.MkdirAll(subdomainsDir, 0755); err != nil {
+			return fmt.Errorf("error al crear directorio de subdominios: %v", err)
+		}
+
+		// Crear directorio específico para este subdominio
+		if err := os.MkdirAll(opts.HomeDir, 0755); err != nil {
+			return fmt.Errorf("error al crear directorio del subdominio: %v", err)
+		}
+
+		// Crear estructura de directorios para el subdominio
+		dirs := []string{
+			filepath.Join(opts.HomeDir, "public_html"),
+			filepath.Join(opts.HomeDir, "nginx"),
+			filepath.Join(opts.HomeDir, "logs"),
+		}
+
+		for _, dir := range dirs {
+			if err := os.MkdirAll(dir, 0755); err != nil {
+				return fmt.Errorf("error al crear directorio %s: %v", dir, err)
+			}
+		}
+
+		// Establecer permisos y propietario para el subdominio
+		cmd := exec.Command("chown", "-R", fmt.Sprintf("%s:%s", opts.User, opts.User), opts.HomeDir)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("error al cambiar propietario del subdominio: %v\n%s", err, output)
+		}
+
+		cmd = exec.Command("chmod", "-R", "g+rX", opts.HomeDir)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("error al configurar permisos del subdominio: %v\n%s", err, output)
+		}
+
+		fmt.Printf("Estructura de subdominio creada en %s\n", opts.HomeDir)
 		return nil
 	}
 
@@ -287,11 +330,6 @@ func createUserAndDirs(opts *SiteOptions) error {
 
 // generateNginxConfig genera la configuración de Nginx para el sitio
 func generateNginxConfig(opts *SiteOptions, cfg *config.Config) error {
-	// Si es un subdominio, no necesitamos generar la configuración de Nginx
-	// ya que usará la del dominio principal
-	if opts.IsSubdomain {
-		return nil
-	}
 
 	// Determinar qué plantilla usar según si es subdominio o no
 	var tmplPath string
