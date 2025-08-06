@@ -66,8 +66,8 @@ detect_arch() {
             echo "arm64"
             ;;
         *)
-            log_error "Arquitectura no soportada: $arch"
-            log_info "SiteManager soporta: amd64, arm64"
+            log_error "Arquitectura no soportada: $arch" >&2
+            log_info "SiteManager soporta: amd64, arm64" >&2
             exit 1
             ;;
     esac
@@ -82,8 +82,8 @@ detect_os() {
             echo "linux"
             ;;
         *)
-            log_error "Sistema operativo no soportado: $os"
-            log_info "SiteManager solo soporta Linux (Ubuntu/Debian)"
+            log_error "Sistema operativo no soportado: $os" >&2
+            log_info "SiteManager solo soporta Linux (Ubuntu/Debian)" >&2
             exit 1
             ;;
     esac
@@ -164,8 +164,8 @@ check_dependencies() {
 # Obtener la última versión desde GitHub
 get_latest_version() {
     local api_response
-    if ! api_response=$(curl -s "$GITHUB_API/releases/latest"); then
-        log_error "No se pudo conectar a GitHub API"
+    if ! api_response=$(curl -s "$GITHUB_API/releases/latest" 2>/dev/null); then
+        log_error "No se pudo conectar a GitHub API" >&2
         exit 1
     fi
     
@@ -173,7 +173,7 @@ get_latest_version() {
     version=$(echo "$api_response" | grep '"tag_name":' | cut -d'"' -f4)
     
     if [ -z "$version" ]; then
-        log_error "No se pudo obtener la versión desde GitHub"
+        log_error "No se pudo obtener la versión desde GitHub" >&2
         exit 1
     fi
     
@@ -196,7 +196,7 @@ download_sitemanager() {
     TMP_DIR=$(mktemp -d)
     local tar_file="$TMP_DIR/$filename"
     
-    if ! curl -L -o "$tar_file" "$download_url" 2>&1; then
+    if ! curl -L -o "$tar_file" "$download_url" >/dev/null 2>&1; then
         log_error "Falló la descarga de $filename" >&2
         log_info "Verifica que la versión $version esté disponible para tu arquitectura" >&2
         exit 1
@@ -344,6 +344,7 @@ main() {
     local os arch version
     os=$(detect_os)
     arch=$(detect_arch)
+    
     log_info "Obteniendo información de la última versión..."
     version=$(get_latest_version)
     
