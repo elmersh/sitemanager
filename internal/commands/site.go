@@ -24,6 +24,7 @@ type SiteOptions struct {
 	NginxDir     string
 	IsSubdomain  bool
 	ParentDomain string
+	SkelDir      string
 }
 
 // AddSiteCommand agrega el comando site al comando raíz
@@ -71,9 +72,15 @@ func AddSiteCommand(rootCmd *cobra.Command, cfg *config.Config) {
 
 			opts.NginxDir = filepath.Join(opts.HomeDir, "nginx")
 			opts.Port = port
+			opts.SkelDir = cfg.SkelDir
 
 			// Crear usuario y directorios
 			if err := createUserAndDirs(&opts); err != nil {
+				return err
+			}
+
+			// Crear contenido específico según el tipo de sitio
+			if err := createSiteContent(&opts); err != nil {
 				return err
 			}
 
@@ -99,7 +106,7 @@ func AddSiteCommand(rootCmd *cobra.Command, cfg *config.Config) {
 
 	// Agregar flags
 	siteCmd.Flags().StringVarP(&opts.Domain, "domain", "d", "", "Dominio del sitio (obligatorio)")
-	siteCmd.Flags().StringVarP(&opts.Type, "type", "t", "", "Tipo de sitio (laravel, nodejs)")
+	siteCmd.Flags().StringVarP(&opts.Type, "type", "t", "", "Tipo de sitio (laravel, nodejs, static)")
 	siteCmd.Flags().StringVarP(&opts.PHP, "php", "p", "8.1", "Versión de PHP (para sitios Laravel)")
 	siteCmd.Flags().IntVarP(&port, "port", "P", 3000, "Puerto (para sitios Node.js)")
 
@@ -145,28 +152,74 @@ func createUserAndDirs(opts *SiteOptions) error {
 		}
 	}
 
-	// Crear directorio nginx si no existe
-	if err := os.MkdirAll(opts.NginxDir, 0755); err != nil {
-		return fmt.Errorf("error al crear directorio Nginx: %v", err)
+	// Si es un subdominio, no necesitamos crear la estructura de directorios
+	// ya que usará la del dominio principal
+	if opts.IsSubdomain {
+		return nil
 	}
 
-	// Crear estructura básica del sitio
-	publicDir := filepath.Join(opts.HomeDir, "public_html")
-	if err := os.MkdirAll(publicDir, 0755); err != nil {
-		return fmt.Errorf("error al crear directorio public_html: %v", err)
+	// Verificar si existe el directorio skel
+	if _, err := os.Stat(opts.SkelDir); os.IsNotExist(err) {
+		// Si no existe, crearlo con la estructura básica
+		fmt.Printf("El directorio skel no existe, creándolo en %s...\n", opts.SkelDir)
+		if err := os.MkdirAll(opts.SkelDir, 0755); err != nil {
+			return fmt.Errorf("error al crear el directorio skel: %v", err)
+		}
+
+		// Crear la estructura básica del directorio skel
+		dirs := []string{
+			"public_html",
+			"nginx",
+			"logs",
+			"apps",
+		}
+
+		for _, dir := range dirs {
+			path := filepath.Join(opts.SkelDir, dir)
+			if err := os.MkdirAll(path, 0755); err != nil {
+				return fmt.Errorf("error al crear el directorio %s: %v", path, err)
+			}
+		}
+
+		// Crear index.html de prueba
+		indexFile := filepath.Join(opts.SkelDir, "public_html", "index.html")
+		indexContent := fmt.Sprintf("<html><body><h1>Bienvenido a %s</h1><p>Sitio configurado con SiteManager</p></body></html>", opts.Domain)
+		if err := os.WriteFile(indexFile, []byte(indexContent), 0644); err != nil {
+			return fmt.Errorf("error al crear el archivo index.html: %v", err)
+		}
+
+		// Establecer permisos
+		cmd := exec.Command("chmod", "-R", "755", opts.SkelDir)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("error al establecer permisos: %v\n%s", err, output)
+		}
 	}
 
-	// Crear directorio de logs
-	logsDir := filepath.Join(opts.HomeDir, "logs")
-	if err := os.MkdirAll(logsDir, 0755); err != nil {
-		return fmt.Errorf("error al crear directorio logs: %v", err)
+	// Verificar si el directorio skel tiene contenido
+	entries, err := os.ReadDir(opts.SkelDir)
+	if err != nil {
+		return fmt.Errorf("error al leer el directorio skel: %v", err)
 	}
 
-	// Crear index.html de prueba
-	indexFile := filepath.Join(publicDir, "index.html")
-	indexContent := fmt.Sprintf("<html><body><h1>Bienvenido a %s</h1><p>Sitio configurado con SiteManager</p></body></html>", opts.Domain)
-	if err := os.WriteFile(indexFile, []byte(indexContent), 0644); err != nil {
-		return fmt.Errorf("error al crear archivo index.html: %v", err)
+	if len(entries) == 0 {
+		return fmt.Errorf("el directorio skel está vacío: %s", opts.SkelDir)
+	}
+
+	// Copiar la estructura del directorio skel al directorio home del usuario
+	fmt.Printf("Copiando estructura del directorio skel a %s...\n", opts.HomeDir)
+
+	// Usar rsync si está disponible, de lo contrario usar cp
+	if _, err := exec.LookPath("rsync"); err == nil {
+		cmd := exec.Command("rsync", "-av", opts.SkelDir+"/", opts.HomeDir+"/")
+		if output, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("error al copiar estructura del directorio skel con rsync: %v\n%s", err, output)
+		}
+	} else {
+		// Usar cp como alternativa
+		cmd := exec.Command("cp", "-r", opts.SkelDir+"/.", opts.HomeDir+"/")
+		if output, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("error al copiar estructura del directorio skel con cp: %v\n%s", err, output)
+		}
 	}
 
 	// Configurar permisos y grupos
@@ -199,6 +252,12 @@ func createUserAndDirs(opts *SiteOptions) error {
 
 // generateNginxConfig genera la configuración de Nginx para el sitio
 func generateNginxConfig(opts *SiteOptions, cfg *config.Config) error {
+	// Si es un subdominio, no necesitamos generar la configuración de Nginx
+	// ya que usará la del dominio principal
+	if opts.IsSubdomain {
+		return nil
+	}
+
 	// Determinar qué plantilla usar según si es subdominio o no
 	var tmplPath string
 	if opts.IsSubdomain {
@@ -312,5 +371,403 @@ func reloadNginx() error {
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("error al recargar Nginx: %v\n%s", err, output)
 	}
+	return nil
+}
+
+// createSiteContent crea contenido específico según el tipo de sitio
+func createSiteContent(opts *SiteOptions) error {
+	if opts.Type == "static" {
+		return createStaticSiteContent(opts)
+	}
+	// Para otros tipos (laravel, nodejs) no necesitamos contenido específico por ahora
+	return nil
+}
+
+// createStaticSiteContent crea un sitio estático básico con HTML, CSS y JS
+func createStaticSiteContent(opts *SiteOptions) error {
+	publicDir := filepath.Join(opts.HomeDir, "public_html")
+	
+	// Crear directorios adicionales para sitio estático
+	dirs := []string{
+		filepath.Join(publicDir, "css"),
+		filepath.Join(publicDir, "js"),
+		filepath.Join(publicDir, "img"),
+	}
+	
+	for _, dir := range dirs {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return fmt.Errorf("error al crear directorio %s: %v", dir, err)
+		}
+	}
+	
+	// Crear index.html más completo
+	indexFile := filepath.Join(publicDir, "index.html")
+	indexContent := fmt.Sprintf(`<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bienvenido a %s</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <header>
+        <nav>
+            <h1>%s</h1>
+            <ul>
+                <li><a href="#inicio">Inicio</a></li>
+                <li><a href="#about">Acerca de</a></li>
+                <li><a href="#contact">Contacto</a></li>
+            </ul>
+        </nav>
+    </header>
+
+    <main>
+        <section id="inicio" class="hero">
+            <h2>¡Bienvenido a tu nuevo sitio web!</h2>
+            <p>Este sitio ha sido configurado automáticamente con SiteManager.</p>
+            <p>Puedes editar los archivos en <code>/home/%s/public_html/</code></p>
+            <button onclick="showMessage()">¡Haz clic aquí!</button>
+        </section>
+
+        <section id="about" class="content">
+            <h3>Acerca de este sitio</h3>
+            <p>Este es un sitio web estático generado automáticamente. Incluye:</p>
+            <ul>
+                <li>HTML5 semántico</li>
+                <li>CSS3 responsive</li>
+                <li>JavaScript básico</li>
+                <li>Estructura de directorios organizada</li>
+            </ul>
+        </section>
+
+        <section id="contact" class="content">
+            <h3>¿Listo para personalizar?</h3>
+            <p>Edita estos archivos para personalizar tu sitio:</p>
+            <ul>
+                <li><strong>index.html</strong> - Contenido principal</li>
+                <li><strong>css/style.css</strong> - Estilos</li>
+                <li><strong>js/script.js</strong> - Funcionalidad</li>
+            </ul>
+        </section>
+    </main>
+
+    <footer>
+        <p>&copy; 2024 %s. Sitio generado con SiteManager.</p>
+    </footer>
+
+    <script src="js/script.js"></script>
+</body>
+</html>`, opts.Domain, opts.Domain, opts.Domain, opts.Domain)
+	
+	if err := os.WriteFile(indexFile, []byte(indexContent), 0644); err != nil {
+		return fmt.Errorf("error al crear index.html: %v", err)
+	}
+	
+	// Crear archivo CSS básico
+	cssFile := filepath.Join(publicDir, "css", "style.css")
+	cssContent := `/* Estilos básicos para el sitio */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    line-height: 1.6;
+    color: #333;
+    background-color: #f4f4f4;
+}
+
+header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 1rem 0;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+}
+
+nav {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+nav h1 {
+    font-size: 1.8rem;
+}
+
+nav ul {
+    display: flex;
+    list-style: none;
+}
+
+nav ul li {
+    margin-left: 2rem;
+}
+
+nav ul li a {
+    color: white;
+    text-decoration: none;
+    font-weight: 500;
+    transition: opacity 0.3s ease;
+}
+
+nav ul li a:hover {
+    opacity: 0.8;
+}
+
+main {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+.hero {
+    background: white;
+    padding: 3rem 2rem;
+    border-radius: 10px;
+    text-align: center;
+    margin-bottom: 2rem;
+    box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+}
+
+.hero h2 {
+    color: #667eea;
+    margin-bottom: 1rem;
+    font-size: 2.2rem;
+}
+
+.hero p {
+    margin-bottom: 1rem;
+    font-size: 1.1rem;
+}
+
+.hero code {
+    background-color: #f8f9fa;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-family: 'Courier New', monospace;
+}
+
+button {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    font-size: 1rem;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: transform 0.3s ease;
+}
+
+button:hover {
+    transform: translateY(-2px);
+}
+
+.content {
+    background: white;
+    padding: 2rem;
+    margin-bottom: 2rem;
+    border-radius: 10px;
+    box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+}
+
+.content h3 {
+    color: #667eea;
+    margin-bottom: 1rem;
+    font-size: 1.5rem;
+}
+
+.content ul {
+    margin-left: 1.5rem;
+}
+
+.content li {
+    margin-bottom: 0.5rem;
+}
+
+footer {
+    background: #333;
+    color: white;
+    text-align: center;
+    padding: 2rem;
+    margin-top: 2rem;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    nav {
+        flex-direction: column;
+        text-align: center;
+    }
+    
+    nav ul {
+        margin-top: 1rem;
+    }
+    
+    nav ul li {
+        margin: 0 1rem;
+    }
+    
+    .hero {
+        padding: 2rem 1rem;
+    }
+    
+    .hero h2 {
+        font-size: 1.8rem;
+    }
+    
+    main {
+        padding: 10px;
+    }
+}
+`
+	
+	if err := os.WriteFile(cssFile, []byte(cssContent), 0644); err != nil {
+		return fmt.Errorf("error al crear style.css: %v", err)
+	}
+	
+	// Crear archivo JavaScript básico
+	jsFile := filepath.Join(publicDir, "js", "script.js")
+	jsContent := `// JavaScript básico para el sitio
+
+// Función que se ejecuta cuando se hace clic en el botón
+function showMessage() {
+    alert('¡Bienvenido a tu sitio web estático! 🎉\\n\\nAhora puedes personalizar este sitio editando los archivos en tu servidor.');
+}
+
+// Smooth scroll para los enlaces de navegación
+document.addEventListener('DOMContentLoaded', function() {
+    // Agregar comportamiento smooth scroll a los enlaces
+    const links = document.querySelectorAll('nav a[href^="#"]');
+    
+    links.forEach(link => {
+        link.addEventListener('click', function(e) {
+            e.preventDefault();
+            
+            const targetId = this.getAttribute('href');
+            const targetElement = document.querySelector(targetId);
+            
+            if (targetElement) {
+                targetElement.scrollIntoView({
+                    behavior: 'smooth',
+                    block: 'start'
+                });
+            }
+        });
+    });
+    
+    // Agregar efecto de aparición al cargar la página
+    const sections = document.querySelectorAll('section');
+    sections.forEach(section => {
+        section.style.opacity = '0';
+        section.style.transform = 'translateY(20px)';
+        section.style.transition = 'all 0.6s ease';
+    });
+    
+    // Animar las secciones
+    setTimeout(() => {
+        sections.forEach((section, index) => {
+            setTimeout(() => {
+                section.style.opacity = '1';
+                section.style.transform = 'translateY(0)';
+            }, index * 200);
+        });
+    }, 100);
+});
+
+// Función para mostrar la fecha actual
+function updateDateTime() {
+    const now = new Date();
+    const options = { 
+        year: 'numeric', 
+        month: 'long', 
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+    };
+    
+    const dateTimeString = now.toLocaleDateString('es-ES', options);
+    
+    // Si hay un elemento con id 'datetime', actualizar su contenido
+    const dateTimeElement = document.getElementById('datetime');
+    if (dateTimeElement) {
+        dateTimeElement.textContent = dateTimeString;
+    }
+}
+
+// Actualizar fecha y hora cada minuto
+setInterval(updateDateTime, 60000);
+updateDateTime(); // Ejecutar inmediatamente
+`
+	
+	if err := os.WriteFile(jsFile, []byte(jsContent), 0644); err != nil {
+		return fmt.Errorf("error al crear script.js: %v", err)
+	}
+	
+	// Crear archivo README.md para el desarrollador
+	readmeFile := filepath.Join(opts.HomeDir, "README.md")
+	readmeContent := fmt.Sprintf("# Sitio Web Estático - %s\n\n"+
+		"Este sitio ha sido generado automáticamente por SiteManager.\n\n"+
+		"## Estructura de archivos\n\n"+
+		"```\n"+
+		"%s/\n"+
+		"├── public_html/          # Directorio público (raíz del sitio web)\n"+
+		"│   ├── index.html        # Página principal\n"+
+		"│   ├── css/\n"+
+		"│   │   └── style.css     # Estilos del sitio\n"+
+		"│   ├── js/\n"+
+		"│   │   └── script.js     # JavaScript del sitio\n"+
+		"│   └── img/              # Directorio para imágenes\n"+
+		"├── logs/                 # Logs de Nginx\n"+
+		"├── nginx/               # Configuraciones de Nginx\n"+
+		"└── README.md            # Este archivo\n"+
+		"```\n\n"+
+		"## Personalización\n\n"+
+		"1. **HTML**: Edita `public_html/index.html` para cambiar el contenido\n"+
+		"2. **CSS**: Modifica `public_html/css/style.css` para cambiar los estilos\n"+
+		"3. **JavaScript**: Actualiza `public_html/js/script.js` para agregar funcionalidad\n"+
+		"4. **Imágenes**: Coloca tus imágenes en `public_html/img/`\n\n"+
+		"## Comandos útiles\n\n"+
+		"```bash\n"+
+		"# Ver logs del sitio\n"+
+		"sudo tail -f %s/logs/access.log\n"+
+		"sudo tail -f %s/logs/error.log\n\n"+
+		"# Configurar SSL (recomendado)\n"+
+		"sudo sm secure -d %s -e tu@email.com\n\n"+
+		"# Verificar configuración de Nginx\n"+
+		"sudo nginx -t\n\n"+
+		"# Recargar Nginx después de cambios\n"+
+		"sudo systemctl reload nginx\n"+
+		"```\n\n"+
+		"## Tecnologías incluidas\n\n"+
+		"- HTML5 semántico\n"+
+		"- CSS3 con Flexbox y Grid\n"+
+		"- JavaScript vanilla (ES6+)\n"+
+		"- Diseño responsive\n"+
+		"- Optimización para SEO básico\n\n"+
+		"## Notas importantes\n\n"+
+		"- Los archivos web deben estar en `public_html/`\n"+
+		"- El sitio es completamente estático (no requiere PHP, Node.js, etc.)\n"+
+		"- Para cambios en la configuración de Nginx, contacta al administrador del servidor\n"+
+		"- Recuerda hacer respaldos regulares de tus archivos\n\n"+
+		"¡Disfruta personalizando tu sitio web!\n",
+		opts.Domain, opts.HomeDir, opts.HomeDir, opts.HomeDir, opts.Domain)
+	
+	if err := os.WriteFile(readmeFile, []byte(readmeContent), 0644); err != nil {
+		return fmt.Errorf("error al crear README.md: %v", err)
+	}
+	
+	// Establecer permisos correctos
+	cmd := exec.Command("chown", "-R", fmt.Sprintf("%s:%s", opts.User, opts.User), opts.HomeDir)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("error al establecer permisos: %v\n%s", err, output)
+	}
+	
+	fmt.Printf("✅ Sitio estático creado con estructura completa en %s\n", filepath.Join(opts.HomeDir, "public_html"))
 	return nil
 }

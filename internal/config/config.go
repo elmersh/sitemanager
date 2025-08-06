@@ -6,6 +6,7 @@ import (
 	"os/user"
 	"path/filepath"
 
+	"github.com/elmersh/sitemanager/internal/utils"
 	"gopkg.in/yaml.v3"
 )
 
@@ -20,6 +21,7 @@ type Config struct {
 	DefaultTemplate    string            `yaml:"defaultTemplate"`
 	Templates          map[string]string `yaml:"templates"`
 	SubdomainTemplates map[string]string `yaml:"subdomainTemplates"`
+	SkelDir            string            `yaml:"skelDir"`
 }
 
 // LoadConfig carga la configuración desde el archivo de configuración
@@ -51,6 +53,11 @@ func LoadConfig() (*Config, error) {
 		return nil, fmt.Errorf("no se pudo decodificar la configuración: %v", err)
 	}
 
+	// Inicializar el directorio skel si no existe
+	if err := utils.InitSkelDir(cfg.SkelDir); err != nil {
+		return nil, fmt.Errorf("error al inicializar el directorio skel: %v", err)
+	}
+
 	return &cfg, nil
 }
 
@@ -67,11 +74,14 @@ func createDefaultConfig(path string) (*Config, error) {
 		Templates: map[string]string{
 			"laravel": "nginx/laravel.conf.tmpl",
 			"nodejs":  "nginx/nodejs.conf.tmpl",
+			"static":  "nginx/static.conf.tmpl",
 		},
 		SubdomainTemplates: map[string]string{
 			"laravel": "nginx/subdomain_laravel.conf.tmpl",
 			"nodejs":  "nginx/subdomain_nodejs.conf.tmpl",
+			"static":  "nginx/subdomain_static.conf.tmpl",
 		},
+		SkelDir: "/etc/sitemanager/skel",
 	}
 
 	// Crear el directorio .config si no existe

@@ -8,7 +8,7 @@ SiteManager (sm) es una herramienta para gestionar rápidamente sitios web en un
 - Creación automática de usuarios y directorios
 - Generación de configuraciones de Nginx
 - Configuración automática de SSL con Certbot
-- Despliegue de aplicaciones Laravel y Node.js
+- Despliegue de aplicaciones Laravel, Node.js y sitios estáticos
 - Detección automática de frameworks Node.js
 - Gestión de variables de entorno
 - Integración con bases de datos
@@ -92,7 +92,7 @@ sudo sm site -d ejemplo.com -t laravel -p 8.4
 
 Opciones:
 - `-d, --domain`: Dominio del sitio (obligatorio)
-- `-t, --type`: Tipo de sitio (laravel, nodejs)
+- `-t, --type`: Tipo de sitio (laravel, nodejs, static)
 - `-p, --php`: Versión de PHP (para sitios Laravel)
 - `-P, --port`: Puerto para aplicaciones Node.js (default: 3000)
 
@@ -108,6 +108,11 @@ Para un sitio Node.js:
 sudo sm site -d miapi.com -t nodejs -P 3001
 ```
 
+Para un sitio estático (HTML/CSS/JS):
+```bash
+sudo sm site -d mipagina.com -t static
+```
+
 Para un subdominio:
 ```bash
 sudo sm site -d admin.miapp.com -t laravel
@@ -116,6 +121,7 @@ sudo sm site -d admin.miapp.com -t laravel
 **Notas:**
 - El comando crea un usuario en el sistema con el nombre del dominio
 - Configura Nginx con las plantillas adecuadas
+- Para sitios estáticos, crea una estructura completa con HTML, CSS y JavaScript de ejemplo
 - Para subdominios, utiliza el usuario del dominio principal
 
 ### Configurar SSL con Certbot
@@ -181,6 +187,7 @@ sudo sm deploy -d admin.miapp.com -r https://github.com/usuario/admin-panel.git 
 - El comando detecta automáticamente el tipo de framework (NestJS, NextJS, Express, etc.)
 - Para Laravel, ejecuta automáticamente composer install, migraciones, etc.
 - Para Node.js, instala dependencias, ejecuta build y configura PM2
+- Para sitios estáticos, simplemente copia los archivos al directorio public_html
 
 ### Configurar variables de entorno
 
@@ -216,6 +223,64 @@ sudo sm env -d miapi.com -f /path/to/.env.production
 - Las contraseñas y secretos se ingresan con entrada oculta
 - Genera automáticamente valores seguros para tokens y secretos
 - Configura correctamente el propietario del archivo .env
+
+## Sitios Estáticos
+
+SiteManager incluye soporte completo para sitios web estáticos que solo requieren HTML, CSS y JavaScript.
+
+### Características de los sitios estáticos
+
+- **Estructura automática**: Crea directorios organizados (css/, js/, img/)
+- **Plantilla base**: Genera un sitio de ejemplo completamente funcional
+- **Optimización**: Configuración de Nginx optimizada para archivos estáticos
+- **Caché**: Configuración automática de caché para mejor rendimiento
+- **Responsive**: CSS responsive incluido por defecto
+- **SEO básico**: Estructura HTML optimizada para motores de búsqueda
+
+### Estructura generada
+
+Cuando creas un sitio estático, SiteManager genera automáticamente:
+
+```
+/home/dominio.com/
+├── public_html/
+│   ├── index.html          # Página principal con navegación
+│   ├── css/
+│   │   └── style.css       # CSS responsive completo
+│   ├── js/
+│   │   └── script.js       # JavaScript interactivo
+│   └── img/                # Directorio para imágenes
+├── logs/                   # Logs de Nginx
+├── nginx/                  # Configuración de Nginx
+└── README.md               # Guía de personalización
+```
+
+### Características del template incluido
+
+- **HTML5 semántico** con estructura de navegación
+- **CSS moderno** con gradientes, animaciones y diseño responsive
+- **JavaScript funcional** con smooth scroll y efectos de aparición
+- **Configuración de caché** optimizada en Nginx
+- **Compresión GZIP** habilitada automáticamente
+
+### Personalización rápida
+
+Los archivos generados son completamente editables:
+
+1. **Contenido**: Edita `public_html/index.html`
+2. **Estilos**: Modifica `public_html/css/style.css`
+3. **Funcionalidad**: Actualiza `public_html/js/script.js`
+4. **Imágenes**: Añade archivos a `public_html/img/`
+
+### Compatibilidad con frameworks frontend
+
+Los sitios estáticos son compatibles con:
+- **React** (build estático)
+- **Vue.js** (build estático)
+- **Angular** (build estático)
+- **Cualquier generador de sitios estáticos** (Gatsby, Next.js export, etc.)
+
+Simplemente reemplaza el contenido de `public_html/` con tu build de producción.
 
 ## Características avanzadas
 

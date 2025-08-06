@@ -40,6 +40,34 @@ echo "Instalando nueva versión..."
 cp "$TEMP_DIR/sitemanager/sm" /usr/local/bin/
 chmod +x /usr/local/bin/sm
 
+# Crear directorio skel si no existe o está vacío
+SKEL_DIR="/etc/sitemanager/skel"
+if [ ! -d "$SKEL_DIR" ] || [ -z "$(ls -A $SKEL_DIR)" ]; then
+    echo "Creando o actualizando directorio skel en $SKEL_DIR..."
+    mkdir -p "$SKEL_DIR"
+    
+    # Crear estructura básica del directorio skel
+    mkdir -p "$SKEL_DIR/public_html"
+    mkdir -p "$SKEL_DIR/nginx"
+    mkdir -p "$SKEL_DIR/logs"
+    mkdir -p "$SKEL_DIR/apps"
+    
+    # Crear index.html de prueba
+    cat > "$SKEL_DIR/public_html/index.html" << EOF
+<html>
+<body>
+<h1>Bienvenido a tu sitio</h1>
+<p>Sitio configurado con SiteManager</p>
+</body>
+</html>
+EOF
+    
+    # Establecer permisos
+    chmod -R 755 "$SKEL_DIR"
+    
+    echo "Directorio skel creado correctamente"
+fi
+
 # Limpiar
 echo "Limpiando archivos temporales..."
 rm -rf "$TEMP_DIR"
