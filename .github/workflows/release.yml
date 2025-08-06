@@ -212,7 +212,7 @@ jobs:
         cd ..
 
     - name: Upload artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: sitemanager-${{ matrix.goos }}-${{ matrix.goarch }}
         path: dist/sitemanager-${{ steps.version.outputs.version }}-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz
@@ -280,9 +280,10 @@ jobs:
     
     steps:
     - name: Download all artifacts
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         path: artifacts
+        merge-multiple: true
 
     - name: Get version
       id: version
@@ -298,6 +299,7 @@ jobs:
     - name: Prepare release files
       run: |
         mkdir -p release
+        # Con v4, los artefactos se descargan directamente en artifacts/
         find artifacts -name "*.tar.gz" -exec cp {} release/ \;
         ls -la release/
 
