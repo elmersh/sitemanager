@@ -163,8 +163,6 @@ check_dependencies() {
 
 # Obtener la última versión desde GitHub
 get_latest_version() {
-    log_info "Obteniendo información de la última versión..."
-    
     local api_response
     if ! api_response=$(curl -s "$GITHUB_API/releases/latest"); then
         log_error "No se pudo conectar a GitHub API"
@@ -346,6 +344,7 @@ main() {
     local os arch version
     os=$(detect_os)
     arch=$(detect_arch)
+    log_info "Obteniendo información de la última versión..."
     version=$(get_latest_version)
     
     log_info "Sistema detectado: $os/$arch"
