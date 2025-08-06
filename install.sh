@@ -190,19 +190,19 @@ download_sitemanager() {
     local filename="sitemanager-$version_clean-$os-$arch.tar.gz"
     local download_url="https://github.com/$REPO/releases/download/$version/$filename"
     
-    log_info "Descargando SiteManager $version para $os/$arch..." >&2
-    log_info "URL: $download_url" >&2
+    echo "Descargando SiteManager $version para $os/$arch..." >&2
+    echo "URL: $download_url" >&2
     
     TMP_DIR=$(mktemp -d)
     local tar_file="$TMP_DIR/$filename"
     
     if ! curl -L -o "$tar_file" "$download_url" >/dev/null 2>&1; then
-        log_error "Falló la descarga de $filename" >&2
-        log_info "Verifica que la versión $version esté disponible para tu arquitectura" >&2
+        echo "❌ Falló la descarga de $filename" >&2
+        echo "Verifica que la versión $version esté disponible para tu arquitectura" >&2
         exit 1
     fi
     
-    log_success "Descarga completada" >&2
+    echo "✅ Descarga completada" >&2
     echo "$tar_file"
 }
 
