@@ -1,0 +1,54 @@
+server {
+    listen 80;
+    server_name {{ .Domain }};
+
+    root {{ .RootDir }};
+    index index.html index.htm;
+
+    # Configuración para archivos estáticos
+    location / {
+        try_files $uri $uri/ =404;
+    }
+
+    # Configuración de caché para archivos estáticos
+    location ~* \.(css|js|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        access_log off;
+    }
+
+    # Configuración especial para HTML
+    location ~* \.html$ {
+        expires 1h;
+        add_header Cache-Control "public";
+    }
+
+    # Seguridad: bloquear acceso a archivos sensibles
+    location ~ /\.ht {
+        deny all;
+    }
+
+    location ~ /\.git {
+        deny all;
+    }
+
+    location ~ /\.(env|log)$ {
+        deny all;
+    }
+
+    # Configuración GZIP para mejor rendimiento
+    gzip on;
+    gzip_vary on;
+    gzip_min_length 1024;
+    gzip_types
+        text/plain
+        text/css
+        text/xml
+        text/javascript
+        application/javascript
+        application/xml+rss
+        application/json;
+
+    access_log {{ .HomeDir }}/logs/access.log;
+    error_log {{ .HomeDir }}/logs/error.log;
+}
