@@ -1,0 +1,315 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g., v1.2.0)'
+        required: true
+        type: string
+
+env:
+  GO_VERSION: '1.23'
+
+jobs:
+  build:
+    name: Build binaries
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goos: [linux]
+        goarch: [amd64, arm64]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: ${{ env.GO_VERSION }}
+
+    - name: Get version from tag
+      id: version
+      run: |
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          VERSION="${{ github.event.inputs.tag }}"
+        else
+          VERSION=${GITHUB_REF#refs/tags/}
+        fi
+        echo "version=${VERSION#v}" >> $GITHUB_OUTPUT
+        echo "tag=${VERSION}" >> $GITHUB_OUTPUT
+
+    - name: Install dependencies
+      run: |
+        go mod tidy
+        go get github.com/spf13/cobra@latest
+        go get gopkg.in/yaml.v3@latest
+
+    - name: Run tests
+      run: go test -v ./...
+
+    - name: Build binary
+      run: |
+        GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build \
+          -ldflags "-X main.Version=${{ steps.version.outputs.version }} -X main.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ) -X main.GitCommit=$(git rev-parse --short HEAD)" \
+          -o sitemanager-${{ matrix.goos }}-${{ matrix.goarch }} \
+          cmd/sm/main.go
+
+    - name: Create package structure
+      run: |
+        PACKAGE_NAME="sitemanager-${{ steps.version.outputs.version }}-${{ matrix.goos }}-${{ matrix.goarch }}"
+        mkdir -p dist/$PACKAGE_NAME/{bin,templates/nginx,templates/ssl}
+        
+        # Copiar binario
+        cp sitemanager-${{ matrix.goos }}-${{ matrix.goarch }} dist/$PACKAGE_NAME/bin/sm
+        chmod +x dist/$PACKAGE_NAME/bin/sm
+        
+        # Copiar templates
+        cp internal/templates/nginx/*.tmpl dist/$PACKAGE_NAME/templates/nginx/
+        cp internal/templates/ssl/*.tmpl dist/$PACKAGE_NAME/templates/ssl/
+
+    - name: Create install script
+      run: |
+        PACKAGE_NAME="sitemanager-${{ steps.version.outputs.version }}-${{ matrix.goos }}-${{ matrix.goarch }}"
+        cat > dist/$PACKAGE_NAME/install.sh << 'EOF'
+        #!/bin/bash
+        set -e
+
+        # Verificar permisos de sudo
+        if [ "$EUID" -ne 0 ]; then
+            echo "❌ Este script debe ejecutarse con sudo"
+            exit 1
+        fi
+
+        # Variables
+        PREFIX=${PREFIX:-/usr/local}
+        BINDIR=$PREFIX/bin
+        SHAREDIR=$PREFIX/share/sitemanager
+        CONFDIR=/etc/sitemanager
+
+        echo "🚀 Instalando SiteManager..."
+
+        # Crear directorios
+        mkdir -p $BINDIR
+        mkdir -p $SHAREDIR/templates/nginx
+        mkdir -p $SHAREDIR/templates/ssl
+        mkdir -p $CONFDIR/skel
+
+        # Instalar binario
+        cp bin/sm $BINDIR/
+        chmod +x $BINDIR/sm
+
+        # Instalar templates
+        cp templates/nginx/*.tmpl $SHAREDIR/templates/nginx/
+        cp templates/ssl/*.tmpl $SHAREDIR/templates/ssl/
+
+        # Crear enlace simbólico si no existe
+        if [ ! -L /usr/bin/sm ]; then
+            ln -s $BINDIR/sm /usr/bin/sm
+        fi
+
+        echo "✅ SiteManager ${{ steps.version.outputs.version }} instalado correctamente"
+        echo "📖 Ejecuta 'sudo sm status' para verificar el sistema"
+        EOF
+        
+        chmod +x dist/$PACKAGE_NAME/install.sh
+
+    - name: Create uninstall script
+      run: |
+        PACKAGE_NAME="sitemanager-${{ steps.version.outputs.version }}-${{ matrix.goos }}-${{ matrix.goarch }}"
+        cat > dist/$PACKAGE_NAME/uninstall.sh << 'EOF'
+        #!/bin/bash
+        set -e
+
+        # Verificar permisos de sudo
+        if [ "$EUID" -ne 0 ]; then
+            echo "❌ Este script debe ejecutarse con sudo"
+            exit 1
+        fi
+
+        # Variables
+        PREFIX=${PREFIX:-/usr/local}
+        BINDIR=$PREFIX/bin
+        SHAREDIR=$PREFIX/share/sitemanager
+        CONFDIR=/etc/sitemanager
+
+        echo "🗑️  Desinstalando SiteManager..."
+
+        # Eliminar binario y enlace simbólico
+        rm -f $BINDIR/sm
+        rm -f /usr/bin/sm
+
+        # Eliminar templates
+        rm -rf $SHAREDIR
+
+        # Preguntar si eliminar configuración
+        read -p "¿Eliminar configuración del sistema? (y/N): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            rm -rf $CONFDIR
+            echo "📁 Configuración eliminada"
+        fi
+
+        echo "✅ SiteManager desinstalado correctamente"
+        EOF
+        
+        chmod +x dist/$PACKAGE_NAME/uninstall.sh
+
+    - name: Create README
+      run: |
+        PACKAGE_NAME="sitemanager-${{ steps.version.outputs.version }}-${{ matrix.goos }}-${{ matrix.goarch }}"
+        cat > dist/$PACKAGE_NAME/README.md << EOF
+        # SiteManager ${{ steps.version.outputs.version }} - Ubuntu/Debian Distribution
+
+        Este paquete contiene SiteManager compilado para ${{ matrix.goos }}/${{ matrix.goarch }}.
+
+        ## Instalación
+
+        \`\`\`bash
+        # Extraer el paquete
+        tar -xzf $PACKAGE_NAME.tar.gz
+        cd $PACKAGE_NAME/
+
+        # Instalar (requiere sudo)
+        sudo ./install.sh
+        \`\`\`
+
+        ## Verificación
+
+        \`\`\`bash
+        # Verificar instalación
+        sudo sm status
+
+        # Ver versión
+        sm --version
+
+        # Auto-actualización
+        sudo sm self-update
+        \`\`\`
+
+        ## Desinstalación
+
+        \`\`\`bash
+        sudo ./uninstall.sh
+        \`\`\`
+
+        ## Soporte
+
+        Para más información: https://github.com/elmersh/sitemanager
+        EOF
+
+    - name: Create tarball
+      run: |
+        PACKAGE_NAME="sitemanager-${{ steps.version.outputs.version }}-${{ matrix.goos }}-${{ matrix.goarch }}"
+        cd dist
+        tar -czf $PACKAGE_NAME.tar.gz $PACKAGE_NAME/
+        cd ..
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: sitemanager-${{ matrix.goos }}-${{ matrix.goarch }}
+        path: dist/sitemanager-${{ steps.version.outputs.version }}-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz
+
+  changelog:
+    name: Generate changelog
+    runs-on: ubuntu-latest
+    outputs:
+      changelog: ${{ steps.changelog.outputs.changelog }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Generate changelog
+      id: changelog
+      run: |
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          VERSION="${{ github.event.inputs.tag }}"
+        else
+          VERSION=${GITHUB_REF#refs/tags/}
+        fi
+        
+        # Obtener el tag anterior
+        PREV_TAG=$(git describe --tags --abbrev=0 $VERSION^ 2>/dev/null || echo "")
+        
+        echo "# Changelog for $VERSION" > CHANGELOG.md
+        echo "" >> CHANGELOG.md
+        
+        if [ -n "$PREV_TAG" ]; then
+          echo "## Changes since $PREV_TAG" >> CHANGELOG.md
+          echo "" >> CHANGELOG.md
+          
+          # Generar changelog desde el tag anterior
+          git log --oneline --no-merges $PREV_TAG..$VERSION | while read line; do
+            echo "- $line" >> CHANGELOG.md
+          done
+        else
+          echo "## Initial Release" >> CHANGELOG.md
+          echo "" >> CHANGELOG.md
+          echo "- Primera versión de SiteManager" >> CHANGELOG.md
+        fi
+        
+        echo "" >> CHANGELOG.md
+        echo "## Instalación" >> CHANGELOG.md
+        echo "" >> CHANGELOG.md
+        echo '```bash' >> CHANGELOG.md
+        echo "# Instalación rápida" >> CHANGELOG.md
+        echo 'curl -fsSL https://raw.githubusercontent.com/elmersh/sitemanager/main/install.sh | sudo bash' >> CHANGELOG.md
+        echo "" >> CHANGELOG.md
+        echo "# O descarga manual" >> CHANGELOG.md
+        echo "wget https://github.com/elmersh/sitemanager/releases/download/$VERSION/sitemanager-${VERSION#v}-linux-amd64.tar.gz" >> CHANGELOG.md
+        echo '```' >> CHANGELOG.md
+        
+        # Escapar para GitHub Actions
+        CHANGELOG=$(cat CHANGELOG.md | sed ':a;N;$!ba;s/\n/%0A/g')
+        echo "changelog=$CHANGELOG" >> $GITHUB_OUTPUT
+
+  release:
+    name: Create Release
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    needs: [build, changelog]
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v3
+      with:
+        path: artifacts
+
+    - name: Get version
+      id: version
+      run: |
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          VERSION="${{ github.event.inputs.tag }}"
+        else
+          VERSION=${GITHUB_REF#refs/tags/}
+        fi
+        echo "version=${VERSION#v}" >> $GITHUB_OUTPUT
+        echo "tag=${VERSION}" >> $GITHUB_OUTPUT
+
+    - name: Prepare release files
+      run: |
+        mkdir -p release
+        find artifacts -name "*.tar.gz" -exec cp {} release/ \;
+        ls -la release/
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ steps.version.outputs.tag }}
+        name: SiteManager ${{ steps.version.outputs.tag }}
+        body: ${{ needs.changelog.outputs.changelog }}
+        files: release/*.tar.gz
+        draft: false
+        prerelease: false
+        generate_release_notes: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

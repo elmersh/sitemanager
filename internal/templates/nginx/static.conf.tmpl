@@ -36,6 +36,11 @@ server {
         deny all;
     }
 
+    # Headers de seguridad básicos
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "no-referrer-when-downgrade" always;
+
     # Configuración para Single Page Applications (SPA)
     # Descomenta las siguientes líneas si necesitas soporte para SPA como React/Vue sin servidor
     # location / {

@@ -11,7 +11,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var version = "1.0.0"
+// Variables que se inyectan en tiempo de compilación
+var (
+	Version   = "1.0.0"
+	BuildTime = "unknown"
+	GitCommit = "unknown"
+)
 
 func main() {
 	// Verificar si el usuario tiene permisos sudo
@@ -31,16 +36,20 @@ func main() {
 	rootCmd := &cobra.Command{
 		Use:     "sm",
 		Short:   "SiteManager - Herramienta para gestionar sitios web en VPS",
-		Version: version,
+		Version: Version,
 		Long: `SiteManager (sm) es una herramienta para gestionar rápidamente sitios web
 en un servidor VPS, incluyendo configuraciones de Nginx, usuarios y
 despliegue de aplicaciones como Laravel y Node.js.`,
 	}
 
+	// Establecer información de versión en commands
+	commands.SetVersionInfo(Version, BuildTime, GitCommit)
+
 	// Agregar comandos
 	commands.AddSiteCommand(rootCmd, cfg)
 	commands.AddSecureCommand(rootCmd, cfg)
 	commands.AddDeployCommand(rootCmd, cfg)
+	commands.AddSelfUpdateCommand(rootCmd, cfg)
 
 	// Comando para verificar el estado del sistema
 	statusCmd := &cobra.Command{

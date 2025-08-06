@@ -33,13 +33,33 @@ func AddSecureCommand(rootCmd *cobra.Command, cfg *config.Config) {
 		Short: "Configurar SSL para un sitio web",
 		Long:  `Configura SSL para un sitio web usando Certbot y actualiza la configuración de Nginx.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Verificar requisitos básicos del sistema
+			if err := utils.CheckBasicSystemRequirements(); err != nil {
+				return err
+			}
+
+			// Verificar dependencias SSL
+			depErrors := utils.CheckSSLDependencies()
+			if len(depErrors) > 0 {
+				return fmt.Errorf("dependencias SSL faltantes:\n%s", utils.FormatDependencyErrors(depErrors))
+			}
+
 			// Configurar opciones
 			if opts.Domain == "" {
 				return fmt.Errorf("el dominio es obligatorio")
 			}
 
+			// Usar email de configuración si no se especifica
 			if opts.Email == "" {
-				return fmt.Errorf("el email es obligatorio para Let's Encrypt")
+				if cfg.Email == "" {
+					return fmt.Errorf("email requerido para SSL - configúralo en ~/.config/sitemanager/config.yaml o usa -e")
+				}
+				opts.Email = cfg.Email
+			}
+			
+			// Verificar configuración SSL
+			if err := cfg.ValidateSSLConfig(); err != nil {
+				return fmt.Errorf("configuración SSL inválida: %v", err)
 			}
 
 			// Configurar usuario y directorios

@@ -25,6 +25,11 @@ server {
         deny all;
     }
 
+    # Headers de seguridad básicos
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "no-referrer-when-downgrade" always;
+
     access_log {{ .HomeDir }}/logs/{{ .Domain }}_access.log;
     error_log {{ .HomeDir }}/logs/{{ .Domain }}_error.log;
 }
