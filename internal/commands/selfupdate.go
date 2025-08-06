@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/elmersh/sitemanager/internal/config"
-	"github.com/elmersh/sitemanager/internal/utils"
 	"github.com/spf13/cobra"
 )
 
@@ -227,10 +226,10 @@ func getLatestRelease() (*GitHubRelease, error) {
 func downloadAndUpdate(release *GitHubRelease) error {
 	// Determinar el archivo a descargar
 	arch := runtime.GOARCH
-	os := runtime.GOOS
+	goos := runtime.GOOS
 	version := strings.TrimPrefix(release.TagName, "v")
 	
-	fileName := fmt.Sprintf("sitemanager-%s-%s-%s.tar.gz", version, os, arch)
+	fileName := fmt.Sprintf("sitemanager-%s-%s-%s.tar.gz", version, goos, arch)
 	downloadURL := fmt.Sprintf("https://github.com/elmersh/sitemanager/releases/download/%s/%s", release.TagName, fileName)
 
 	fmt.Printf("📥 Descargando %s...\n", fileName)

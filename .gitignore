@@ -48,6 +48,9 @@ tmp/
 temp/
 *.tmp
 
+# Release management script
+release.sh
+
 # OS generated files
 .DS_Store
 .DS_Store?

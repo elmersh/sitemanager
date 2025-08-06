@@ -13,7 +13,7 @@ import (
 
 // Variables que se inyectan en tiempo de compilación
 var (
-	Version   = "1.0.0"
+	Version   = "0.1.2"
 	BuildTime = "unknown"
 	GitCommit = "unknown"
 )

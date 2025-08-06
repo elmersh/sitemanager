@@ -32,7 +32,7 @@ func CheckNginxDependency() error {
 	// Verificar si nginx está corriendo
 	if err := exec.Command("systemctl", "is-active", "nginx").Run(); err != nil {
 		return &AppError{
-			Type:    "service",
+			Type:    ErrorComando,
 			Message: "nginx no está funcionando - ejecuta: sudo systemctl start nginx",
 		}
 	}
@@ -231,7 +231,7 @@ func CheckBasicSystemRequirements() error {
 	// Verificar permisos de root
 	if !CheckRoot() {
 		return &AppError{
-			Type:    "permission",
+			Type:    ErrorPermiso,
 			Message: "se requieren permisos de root (sudo) para ejecutar este comando",
 		}
 	}
@@ -239,7 +239,7 @@ func CheckBasicSystemRequirements() error {
 	// Verificar sistema operativo compatible
 	if !IsLinux() {
 		return &AppError{
-			Type:    "system",
+			Type:    ErrorValidacion,
 			Message: "SiteManager solo es compatible con sistemas Linux (Ubuntu/Debian)",
 		}
 	}
