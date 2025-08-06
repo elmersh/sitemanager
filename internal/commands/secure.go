@@ -33,6 +33,15 @@ func AddSecureCommand(rootCmd *cobra.Command, cfg *config.Config) {
 		Short: "Configurar SSL para un sitio web",
 		Long:  `Configura SSL para un sitio web usando Certbot y actualiza la configuración de Nginx.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Cargar configuración si no se ha pasado
+			if cfg == nil {
+				var err error
+				cfg, err = config.LoadConfig()
+				if err != nil {
+					return fmt.Errorf("error al cargar la configuración: %v", err)
+				}
+			}
+
 			// Verificar requisitos básicos del sistema
 			if err := utils.CheckBasicSystemRequirements(); err != nil {
 				return err

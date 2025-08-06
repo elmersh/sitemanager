@@ -39,6 +39,15 @@ func AddSiteCommand(rootCmd *cobra.Command, cfg *config.Config) {
 		Short: "Configurar un nuevo sitio web",
 		Long:  `Configura un nuevo sitio web creando un usuario, directorios y configuración de Nginx.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Cargar configuración si no se ha pasado
+			if cfg == nil {
+				var err error
+				cfg, err = config.LoadConfig()
+				if err != nil {
+					return fmt.Errorf("error al cargar la configuración: %v", err)
+				}
+			}
+
 			// Verificar requisitos básicos del sistema
 			if err := utils.CheckBasicSystemRequirements(); err != nil {
 				return err

@@ -63,6 +63,15 @@ func AddSelfUpdateCommand(rootCmd *cobra.Command, cfg *config.Config) {
 		Long: `Descarga e instala automáticamente la última versión de SiteManager desde GitHub.
 Este comando requiere permisos de sudo y conexión a internet.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Cargar configuración si no se ha pasado
+			if cfg == nil {
+				var err error
+				cfg, err = config.LoadConfig()
+				if err != nil {
+					return fmt.Errorf("error al cargar la configuración: %v", err)
+				}
+			}
+
 			return runSelfUpdate()
 		},
 	}
@@ -74,6 +83,15 @@ Este comando requiere permisos de sudo y conexión a internet.`,
 		Long: `Verifica si hay una versión más reciente de SiteManager disponible
 sin instalarla. Muestra información sobre la nueva versión si está disponible.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Cargar configuración si no se ha pasado
+			if cfg == nil {
+				var err error
+				cfg, err = config.LoadConfig()
+				if err != nil {
+					return fmt.Errorf("error al cargar la configuración: %v", err)
+				}
+			}
+
 			return checkForUpdates(false)
 		},
 	}
@@ -98,6 +116,15 @@ sin instalarla. Muestra información sobre la nueva versión si está disponible
 		Use:   "check",
 		Short: "Verificar actualizaciones disponibles",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Cargar configuración si no se ha pasado
+			if cfg == nil {
+				var err error
+				cfg, err = config.LoadConfig()
+				if err != nil {
+					return fmt.Errorf("error al cargar la configuración: %v", err)
+				}
+			}
+
 			return checkForUpdates(true)
 		},
 	}

@@ -51,6 +51,14 @@ func AddDeployCommand(rootCmd *cobra.Command, cfg *config.Config) {
 		Short: "Desplegar una aplicación web",
 		Long:  `Despliega una aplicación web desde un repositorio Git y configura el entorno necesario.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Cargar configuración si no se ha pasado
+			if cfg == nil {
+				var err error
+				cfg, err = config.LoadConfig()
+				if err != nil {
+					return fmt.Errorf("error al cargar la configuración: %v", err)
+				}
+			}
 
 			if opts.Domain == "" {
 				return fmt.Errorf("el dominio es obligatorio")
