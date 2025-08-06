@@ -185,25 +185,24 @@ download_sitemanager() {
     local version="$1"
     local os="$2"
     local arch="$3"
+    local tmp_dir="$4"
     
     local version_clean="${version#v}"  # Remover 'v' del inicio
     local filename="sitemanager-$version_clean-$os-$arch.tar.gz"
     local download_url="https://github.com/$REPO/releases/download/$version/$filename"
     
-    echo "Descargando SiteManager $version para $os/$arch..." >&2
-    echo "URL: $download_url" >&2
+    log_info "Descargando SiteManager $version para $os/$arch..."
+    log_info "URL: $download_url"
     
-    TMP_DIR=$(mktemp -d)
-    local tar_file="$TMP_DIR/$filename"
+    DOWNLOADED_FILE="$tmp_dir/$filename"
     
-    if ! curl -L -o "$tar_file" "$download_url" >/dev/null 2>&1; then
-        echo "❌ Falló la descarga de $filename" >&2
-        echo "Verifica que la versión $version esté disponible para tu arquitectura" >&2
+    if ! curl -L -o "$DOWNLOADED_FILE" "$download_url" >/dev/null 2>&1; then
+        log_error "Falló la descarga de $filename"
+        log_info "Verifica que la versión $version esté disponible para tu arquitectura"
         exit 1
     fi
     
-    echo "✅ Descarga completada" >&2
-    echo "$tar_file"
+    log_success "Descarga completada"
 }
 
 # Extraer e instalar SiteManager
@@ -351,10 +350,12 @@ main() {
     log_info "Sistema detectado: $os/$arch"
     log_info "Versión a instalar: $version"
     
+    # Crear directorio temporal
+    TMP_DIR=$(mktemp -d)
+    
     # Descargar e instalar
-    local tar_file
-    tar_file=$(download_sitemanager "$version" "$os" "$arch")
-    install_sitemanager "$tar_file"
+    download_sitemanager "$version" "$os" "$arch" "$TMP_DIR"
+    install_sitemanager "$DOWNLOADED_FILE"
     verify_installation
     show_post_install_info
 }
