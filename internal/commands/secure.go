@@ -95,7 +95,7 @@ func AddSecureCommand(rootCmd *cobra.Command, cfg *config.Config) {
 			// Verificar si los certificados ya existen
 			certPath := fmt.Sprintf("/etc/letsencrypt/live/%s/fullchain.pem", opts.Domain)
 			if _, err := os.Stat(certPath); err == nil && !opts.Force {
-				fmt.Printf("Los certificados SSL ya existen para %s. Use --force para regenerarlos.\n", opts.Domain)
+				fmt.Printf("Los certificados SSL ya existen para %s. Actualizando solo la configuración de Nginx...\n", opts.Domain)
 			} else {
 				// Obtener certificado SSL con Certbot
 				if err := obtainSSLCertificate(&opts); err != nil {
@@ -130,12 +130,12 @@ func AddSecureCommand(rootCmd *cobra.Command, cfg *config.Config) {
 
 	// Agregar flags
 	secureCmd.Flags().StringVarP(&opts.Domain, "domain", "d", "", "Dominio del sitio (obligatorio)")
-	secureCmd.Flags().StringVarP(&opts.Email, "email", "e", "", "Email para Let's Encrypt (obligatorio)")
+	secureCmd.Flags().StringVarP(&opts.Email, "email", "e", "", "Email para Let's Encrypt (opcional si está configurado)")
 	secureCmd.Flags().BoolVar(&opts.Force, "force", false, "Forzar la regeneración de certificados SSL y actualización de configuración")
 
 	// Marcar flags obligatorios
 	secureCmd.MarkFlagRequired("domain")
-	secureCmd.MarkFlagRequired("email")
+	// Email es opcional - se puede tomar de la configuración
 
 	// Validación de requisitos antes de ejecutar
 	secureCmd.PreRunE = func(cmd *cobra.Command, args []string) error {
@@ -260,6 +260,20 @@ func obtainSSLCertificate(opts *SecureOptions) error {
 
 // updateNginxConfigWithSSL actualiza la configuración de Nginx para usar SSL
 func updateNginxConfigWithSSL(opts *SecureOptions, cfg *config.Config) error {
+	// Detectar el tipo de sitio leyendo la configuración actual
+	nginxDir := filepath.Join(opts.HomeDir, "nginx")
+	confFile := filepath.Join(nginxDir, fmt.Sprintf("%s.conf", opts.Domain))
+	
+	siteType := "static" // Por defecto
+	if currentConfig, err := os.ReadFile(confFile); err == nil {
+		configContent := string(currentConfig)
+		if strings.Contains(configContent, "fastcgi_pass") {
+			siteType = "laravel"
+		} else if strings.Contains(configContent, "proxy_pass") {
+			siteType = "nodejs"
+		}
+	}
+
 	// Leer la plantilla SSL
 	tmplPath := "ssl/ssl.conf.tmpl"
 	tmplContent, err := utils.ReadTemplateFile(tmplPath)
@@ -279,13 +293,14 @@ func updateNginxConfigWithSSL(opts *SecureOptions, cfg *config.Config) error {
 		"CertPath":     fmt.Sprintf("/etc/letsencrypt/live/%s/fullchain.pem", opts.Domain),
 		"KeyPath":      fmt.Sprintf("/etc/letsencrypt/live/%s/privkey.pem", opts.Domain),
 		"HomeDir":      opts.HomeDir,
+		"RootDir":      filepath.Join(opts.HomeDir, "public_html"),
+		"SiteType":     siteType,
 		"RedirectHTTP": true,
-		"PHP":          "8.4",
+		"PHP":          cfg.DefaultPHP,
+		"Port":         cfg.DefaultPort,
 	}
 
-	// Archivo de configuración actual
-	nginxDir := filepath.Join(opts.HomeDir, "nginx")
-	confFile := filepath.Join(nginxDir, fmt.Sprintf("%s.conf", opts.Domain))
+	// Archivo de configuración actual (ya definido arriba)
 
 	// Leer configuración actual
 	currentConfig, err := os.ReadFile(confFile)
