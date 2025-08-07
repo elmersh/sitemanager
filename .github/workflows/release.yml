@@ -244,37 +244,59 @@ jobs:
         # Obtener el tag anterior
         PREV_TAG=$(git describe --tags --abbrev=0 $VERSION^ 2>/dev/null || echo "")
         
-        echo "# Changelog for $VERSION" > CHANGELOG.md
+        echo "## 🚀 SiteManager $VERSION" > CHANGELOG.md
         echo "" >> CHANGELOG.md
         
         if [ -n "$PREV_TAG" ]; then
-          echo "## Changes since $PREV_TAG" >> CHANGELOG.md
+          echo "### 📋 Cambios desde $PREV_TAG" >> CHANGELOG.md
           echo "" >> CHANGELOG.md
           
-          # Generar changelog desde el tag anterior
-          git log --oneline --no-merges $PREV_TAG..$VERSION | while read line; do
-            echo "- $line" >> CHANGELOG.md
+          # Generar changelog desde el tag anterior con mejor formato
+          git log --oneline --no-merges $PREV_TAG..$VERSION | while read commit_hash commit_message; do
+            # Filtrar commits de release automáticos
+            if [[ ! "$commit_message" =~ ^Release\ v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "- **$commit_hash** $commit_message" >> CHANGELOG.md
+            fi
           done
         else
-          echo "## Initial Release" >> CHANGELOG.md
+          echo "### 🎉 Primer Release" >> CHANGELOG.md
           echo "" >> CHANGELOG.md
-          echo "- Primera versión de SiteManager" >> CHANGELOG.md
+          echo "- ✨ Primera versión estable de SiteManager" >> CHANGELOG.md
+          echo "- 🔧 Gestión completa de sitios web con Nginx" >> CHANGELOG.md
+          echo "- 🔒 Configuración automática de SSL con Let's Encrypt" >> CHANGELOG.md
+          echo "- 📁 Soporte para sitios estáticos, Laravel y Node.js" >> CHANGELOG.md
         fi
         
         echo "" >> CHANGELOG.md
-        echo "## Instalación" >> CHANGELOG.md
+        echo "---" >> CHANGELOG.md
         echo "" >> CHANGELOG.md
+        echo "## 📦 Instalación" >> CHANGELOG.md
+        echo "" >> CHANGELOG.md
+        echo "### Instalación Rápida" >> CHANGELOG.md
         echo '```bash' >> CHANGELOG.md
-        echo "# Instalación rápida" >> CHANGELOG.md
         echo 'curl -fsSL https://raw.githubusercontent.com/elmersh/sitemanager/main/install.sh | sudo bash' >> CHANGELOG.md
+        echo '```' >> CHANGELOG.md
         echo "" >> CHANGELOG.md
-        echo "# O descarga manual" >> CHANGELOG.md
+        echo "### Descarga Manual" >> CHANGELOG.md
+        echo '```bash' >> CHANGELOG.md
         echo "wget https://github.com/elmersh/sitemanager/releases/download/$VERSION/sitemanager-${VERSION#v}-linux-amd64.tar.gz" >> CHANGELOG.md
+        echo "tar -xzf sitemanager-${VERSION#v}-linux-amd64.tar.gz" >> CHANGELOG.md
+        echo "cd sitemanager-${VERSION#v}-linux-amd64/" >> CHANGELOG.md
+        echo "sudo ./install.sh" >> CHANGELOG.md
+        echo '```' >> CHANGELOG.md
+        echo "" >> CHANGELOG.md
+        echo "## 🔧 Verificación" >> CHANGELOG.md
+        echo '```bash' >> CHANGELOG.md
+        echo "sudo sm status" >> CHANGELOG.md
+        echo "sm --version" >> CHANGELOG.md
         echo '```' >> CHANGELOG.md
         
-        # Escapar para GitHub Actions
-        CHANGELOG=$(cat CHANGELOG.md | sed ':a;N;$!ba;s/\n/%0A/g')
-        echo "changelog=$CHANGELOG" >> $GITHUB_OUTPUT
+        # Usar heredoc para preservar el formato
+        {
+          echo "changelog<<EOF"
+          cat CHANGELOG.md
+          echo "EOF"
+        } >> $GITHUB_OUTPUT
 
   release:
     name: Create Release
