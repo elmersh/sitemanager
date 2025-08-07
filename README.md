@@ -40,11 +40,11 @@ curl -fsSL https://raw.githubusercontent.com/elmersh/sitemanager/main/install.sh
 
 ```bash
 # Descargar la última versión
-wget https://github.com/elmersh/sitemanager/releases/latest/download/sitemanager-1.0.0-linux-amd64.tar.gz
+wget https://github.com/elmersh/sitemanager/releases/latest/download/sitemanager-0.2.2-linux-amd64.tar.gz
 
 # Extraer e instalar
-tar -xzf sitemanager-1.0.0-linux-amd64.tar.gz
-cd sitemanager-1.0.0/
+tar -xzf sitemanager-0.2.2-linux-amd64.tar.gz
+cd sitemanager-0.2.2/
 sudo ./install.sh
 ```
 

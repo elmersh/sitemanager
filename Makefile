@@ -17,7 +17,7 @@ GOGET = $(GOCMD) get
 BINARY_NAME = sm
 
 # Build flags
-VERSION ?= 1.0.0
+VERSION ?= 0.2.2
 BUILD_TIME ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 GIT_COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 LDFLAGS = -ldflags "-X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME) -X main.GitCommit=$(GIT_COMMIT)"
@@ -26,7 +26,7 @@ LDFLAGS = -ldflags "-X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME) -
 UBUNTU_GOOS = linux
 UBUNTU_GOARCH = amd64
 DIST_DIR = dist
-PACKAGE_NAME = sitemanager-1.0.0
+PACKAGE_NAME = sitemanager-0.2.2
 UBUNTU_PACKAGE = $(DIST_DIR)/$(PACKAGE_NAME)-linux-amd64.tar.gz
 
 .PHONY: all build clean test deps install uninstall ubuntu release changelog
@@ -97,7 +97,7 @@ ubuntu: clean deps
 	
 	# Crear README para la distribución
 	@echo "Creando README para distribución..."
-	@printf '# SiteManager v1.0.0 - Distribución Ubuntu/Debian\n\nEste paquete contiene SiteManager compilado para sistemas Ubuntu/Debian (Linux AMD64).\n\n## Instalación\n\n```bash\n# Extraer el paquete\ntar -xzf sitemanager-1.0.0-linux-amd64.tar.gz\ncd sitemanager-1.0.0/\n\n# Instalar (requiere sudo)\nsudo ./install.sh\n```\n\n## Verificación\n\n```bash\n# Verificar instalación\nsudo sm status\n\n# Ver versión\nsm --version\n\n# Ver ayuda\nsm --help\n```\n\n## Desinstalación\n\n```bash\nsudo ./uninstall.sh\n```\n\n## Contenido del Paquete\n\n- `bin/sm` - Binario principal\n- `templates/` - Plantillas de configuración Nginx y SSL\n- `install.sh` - Script de instalación\n- `uninstall.sh` - Script de desinstalación\n- `README.md` - Este archivo\n\n## Requisitos del Sistema\n\n- Ubuntu 18.04+ o Debian 9+\n- Nginx\n- PHP-FPM (para sitios Laravel)\n- Node.js y PM2 (para sitios Node.js)\n- Certbot (para SSL)\n\n## Soporte\n\nPara más información: https://github.com/elmersh/sitemanager\n' > $(DIST_DIR)/$(PACKAGE_NAME)/README.md
+	@printf '# SiteManager v0.2.2 - Distribución Ubuntu/Debian\n\nEste paquete contiene SiteManager compilado para sistemas Ubuntu/Debian (Linux AMD64).\n\n## Instalación\n\n```bash\n# Extraer el paquete\ntar -xzf sitemanager-0.2.2-linux-amd64.tar.gz\ncd sitemanager-0.2.2/\n\n# Instalar (requiere sudo)\nsudo ./install.sh\n```\n\n## Verificación\n\n```bash\n# Verificar instalación\nsudo sm status\n\n# Ver versión\nsm --version\n\n# Ver ayuda\nsm --help\n```\n\n## Desinstalación\n\n```bash\nsudo ./uninstall.sh\n```\n\n## Contenido del Paquete\n\n- `bin/sm` - Binario principal\n- `templates/` - Plantillas de configuración Nginx y SSL\n- `install.sh` - Script de instalación\n- `uninstall.sh` - Script de desinstalación\n- `README.md` - Este archivo\n\n## Requisitos del Sistema\n\n- Ubuntu 18.04+ o Debian 9+\n- Nginx\n- PHP-FPM (para sitios Laravel)\n- Node.js y PM2 (para sitios Node.js)\n- Certbot (para SSL)\n\n## Soporte\n\nPara más información: https://github.com/elmersh/sitemanager\n' > $(DIST_DIR)/$(PACKAGE_NAME)/README.md
 	
 	# Crear el paquete tar.gz
 	@echo "Creando paquete comprimido..."
